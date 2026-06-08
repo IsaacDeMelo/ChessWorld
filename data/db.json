@@ -1,0 +1,273 @@
+{
+  "players": [
+    {
+      "username": "Isaac",
+      "password": "brasil2021",
+      "xp": 120,
+      "x": 100,
+      "y": 100,
+      "sprite": "cube",
+      "color": "#888",
+      "level": 2,
+      "wins": 4,
+      "losses": 3,
+      "skin": "Isaac"
+    },
+    {
+      "username": "Jack",
+      "password": "jack",
+      "xp": 40,
+      "level": 1,
+      "wins": 1,
+      "losses": 3,
+      "x": 100,
+      "y": 100,
+      "sprite": "cube",
+      "color": "#2196F3",
+      "skin": "Proff"
+    },
+    {
+      "username": "j",
+      "password": "b",
+      "xp": 5,
+      "level": 1,
+      "wins": 0,
+      "losses": 1,
+      "x": 100,
+      "y": 100,
+      "sprite": "cube",
+      "color": "#2196F3"
+    },
+    {
+      "username": "czczxc",
+      "xp": 0,
+      "level": 1,
+      "wins": 0,
+      "losses": 0,
+      "x": 100,
+      "y": 100,
+      "color": "#F44336",
+      "skin": "undefined"
+    },
+    {
+      "username": "JP",
+      "xp": 0,
+      "level": 1,
+      "x": 100,
+      "y": 100,
+      "color": "#2196F3",
+      "skin": "cube"
+    },
+    {
+      "username": "Convidado",
+      "xp": 0,
+      "level": 1,
+      "x": 100,
+      "y": 100,
+      "color": "#2196F3",
+      "skin": "Proff"
+    },
+    {
+      "username": "Prof",
+      "xp": 0,
+      "level": 1,
+      "x": 100,
+      "y": 100,
+      "color": "#2196F3",
+      "skin": "Proff"
+    },
+    {
+      "username": "Oi",
+      "xp": 0,
+      "level": 1,
+      "x": 100,
+      "y": 100,
+      "color": "#2196F3",
+      "skin": "Proff"
+    },
+    {
+      "username": "Isaac Iphone",
+      "xp": 0,
+      "level": 1,
+      "x": 100,
+      "y": 100,
+      "color": "#888",
+      "skin": "Isaac"
+    },
+    {
+      "username": "Isaac iPhone",
+      "xp": 0,
+      "level": 1,
+      "x": 100,
+      "y": 100,
+      "color": "#00BCD4",
+      "skin": "Shadow"
+    },
+    {
+      "username": "Isaac pc",
+      "xp": 0,
+      "level": 1,
+      "x": 100,
+      "y": 100,
+      "color": "#888",
+      "skin": "Shadow"
+    }
+  ],
+  "objects": [
+    {
+      "x": 500,
+      "y": 25,
+      "w": 21,
+      "h": 69,
+      "id": "b_1780770695154"
+    },
+    {
+      "x": 32,
+      "y": 29,
+      "w": 497,
+      "h": 68,
+      "id": "b_1780770716816"
+    },
+    {
+      "x": 450,
+      "y": 75,
+      "w": 88,
+      "h": 84,
+      "id": "b_1780770722954"
+    },
+    {
+      "x": 510,
+      "y": 11,
+      "w": 26,
+      "h": 373,
+      "id": "b_1780770729928"
+    },
+    {
+      "x": 19,
+      "y": 372,
+      "w": 528,
+      "h": 9,
+      "id": "b_1780770732834"
+    },
+    {
+      "x": 21,
+      "y": 13,
+      "w": 17,
+      "h": 384,
+      "id": "b_1780770737830"
+    },
+    {
+      "x": 7,
+      "y": 24,
+      "w": 525,
+      "h": 6,
+      "id": "b_1780770741633"
+    }
+  ],
+  "skins": [
+    {
+      "name": "main",
+      "url": "/skins/skin_1780669474021.png"
+    },
+    {
+      "id": "1780672011984",
+      "name": "Proff",
+      "url": "/uploads/1780672011981_dm1uxwqe2a5f7b8fe474605b10608b668fdb1af.png"
+    },
+    {
+      "id": "1780672438276",
+      "name": "Shadow",
+      "url": "/uploads/1780672438273_dm1uwrafd3d87edf1704afe97f5c7493eea4ede.png"
+    },
+    {
+      "id": "1780676105034",
+      "name": "Isaac",
+      "url": "/uploads/1780676105032_dm15tml62d9933139bc4e6f808da35cc26dafcf.png"
+    }
+  ],
+  "pieceSprites": {},
+  "spriteSheets": {},
+  "npcs": [
+    {
+      "x": 43,
+      "y": 157,
+      "name": "Erika",
+      "skin": "Proff",
+      "dir": "right",
+      "dialogues": [
+        {
+          "text": "Oii",
+          "responses": [
+            {
+              "text": "Vamos duelar",
+              "action": "duel"
+            }
+          ]
+        }
+      ],
+      "isBot": true,
+      "botLevel": 1,
+      "id": "npc_1780770913965"
+    },
+    {
+      "x": 94,
+      "y": 241,
+      "name": "Hardy",
+      "skin": "main",
+      "dir": "right",
+      "dialogues": [
+        {
+          "text": "... Vamos?",
+          "responses": [
+            {
+              "text": "Sim",
+              "action": "duel"
+            },
+            {
+              "text": "Não",
+              "action": "close"
+            }
+          ]
+        }
+      ],
+      "isBot": true,
+      "botLevel": 3,
+      "id": "npc_1780777468770"
+    }
+  ],
+  "scenery": [
+    {
+      "id": "1780673906109",
+      "name": "Interior_shadows.png",
+      "url": "/uploads/1780673906104_Interiorshadows.png"
+    }
+  ],
+  "sceneryMap": [
+    {
+      "x": 32,
+      "y": 27,
+      "url": "/uploads/1780674260299_Interiorshadows.png",
+      "w": 496,
+      "h": 352,
+      "z": 1,
+      "id": "sce_1780769394241"
+    }
+  ],
+  "sceneryTemplates": [
+    {
+      "id": "1780674260304",
+      "name": "Interior_shadows.png",
+      "url": "/uploads/1780674260299_Interiorshadows.png"
+    },
+    {
+      "id": "1780674949837",
+      "name": "Interior_shadows.png",
+      "url": "/uploads/1780674949830_Interiorshadows.png"
+    },
+    {
+      "id": "1780674955276",
+      "name": "Interior_shadows.png",
+      "url": "/uploads/1780674955266_Interiorshadows.png"
+    }
+  ]
+}

@@ -1,0 +1,570 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ChessWorld</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            margin: 0; overflow: hidden; background: #0a0a14;
+            font-family: 'Courier New', monospace; color: #e0e0e0;
+            touch-action: none; user-select: none; -webkit-user-select: none;
+        }
+        input[type="text"], input[type="number"], select, textarea { user-select: text; -webkit-user-select: text; }
+
+        .pixel-btn {
+            font-family: 'Press Start 2P', monospace; font-size: 10px;
+            padding: 12px 18px; margin: 4px 0; border: none; width: 100%;
+            cursor: pointer; color: #fff; text-transform: uppercase; letter-spacing: 1px;
+            position: relative; image-rendering: pixelated;
+            box-shadow: inset -3px -3px 0 0 rgba(0,0,0,0.3), inset 3px 3px 0 0 rgba(255,255,255,0.15), 4px 4px 0 0 rgba(0,0,0,0.5);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .pixel-btn:active { transform: translate(2px, 2px); box-shadow: inset -3px -3px 0 0 rgba(0,0,0,0.3), inset 3px 3px 0 0 rgba(255,255,255,0.15), 2px 2px 0 0 rgba(0,0,0,0.5); }
+        .pixel-btn:hover { filter: brightness(1.15); }
+        .pixel-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.5); }
+        .btn-primary { background: #0078d4; }
+        .btn-success { background: #2e7d32; }
+        .btn-danger { background: #b71c1c; }
+        .btn-warning { background: #e65100; }
+        .btn-secondary { background: #333; }
+        .btn-sm { font-size: 7px; padding: 7px 10px; width: auto; margin: 2px; }
+
+        .pixel-input {
+            font-family: 'Press Start 2P', monospace; font-size: 10px;
+            padding: 10px 12px; margin: 4px 0; width: 100%;
+            background: #1a1a2e; color: #fff; border: 2px solid #333;
+            outline: none; image-rendering: pixelated;
+        }
+        .pixel-input:focus { border-color: #0078d4; }
+        .pixel-input::placeholder { color: #555; font-size: 8px; }
+        select.pixel-input { cursor: pointer; }
+        textarea.pixel-input { resize: vertical; min-height: 60px; font-size: 8px; line-height: 1.6; }
+
+        .screen { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
+        .screen.active { display: flex; background: #0a0a14; }
+
+        .pixel-panel {
+            background: #111; padding: 28px; width: 380px; max-width: 92vw;
+            text-align: center; position: relative;
+            border: 3px solid #333;
+            box-shadow: 0 8px 0 rgba(0,0,0,0.4), 0 0 40px rgba(0,100,200,0.05);
+        }
+        h1.pixel-title {
+            font-family: 'Press Start 2P', monospace; font-size: 20px;
+            color: #00e5ff; margin-bottom: 8px; letter-spacing: 2px;
+        }
+        .pixel-subtitle { color: #666; font-size: 9px; font-family: 'Press Start 2P', monospace; margin-bottom: 16px; }
+
+        .color-picker { display: flex; gap: 6px; margin: 8px 0; justify-content: center; flex-wrap: wrap; }
+        .color-opt {
+            width: 28px; height: 28px; cursor: pointer; border: 3px solid transparent;
+            image-rendering: pixelated; flex-shrink: 0; transition: border-color 0.15s;
+        }
+        .color-opt:hover { border-color: #666; }
+        .color-opt.selected { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.4); }
+
+        .loading-overlay {
+            position: fixed; inset: 0; background: #0a0a14; z-index: 9999;
+            display: none; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+        }
+        .loading-overlay.active { display: flex; }
+        .pixel-spinner {
+            width: 32px; height: 32px; border: 4px solid #222; border-top-color: #00e5ff;
+            animation: spin 0.6s steps(8) infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #game-world {
+            position: absolute; inset: 0; transform-origin: center center; z-index: 1;
+            background-color: #0a0a14;
+            background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='32' height='32' fill='%230a0a14'/%3E%3Crect x='0' y='0' width='1' height='32' fill='%23151520'/%3E%3Crect x='0' y='0' width='32' height='1' fill='%23151520'/%3E%3C/svg%3E");
+            background-size: 32px 32px;
+        }
+
+        #ui-layer {
+            position: absolute; top: 12px; left: 12px; z-index: 10;
+            background: #111; padding: 12px;
+            border: 3px solid #333;
+            box-shadow: 0 6px 0 rgba(0,0,0,0.4);
+            display: none; flex-direction: column; gap: 6px; width: 220px;
+        }
+        #my-name { font-family: 'Press Start 2P', monospace; font-size: 10px; color: #00e5ff; }
+        #chat-input { font-family: 'Press Start 2P', monospace; font-size: 8px; padding: 8px; }
+
+        .player-entity, .npc-entity { position: absolute; width: 48px; height: 48px; z-index: 10; }
+        body.dev-mode .npc-entity { border: 2px dashed #9c27b0; cursor: move; }
+        .sprite-sheet { width: 48px; height: 48px; background-size: 192px 192px; background-repeat: no-repeat; image-rendering: pixelated; }
+        .player-name {
+            position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
+            background: #000; padding: 3px 6px; font-family: 'Press Start 2P', monospace; font-size: 7px;
+            white-space: nowrap; pointer-events: none; border: 2px solid #333; color: #fff;
+        }
+        .bubble {
+            position: absolute; top: -50px; left: 50%; transform: translateX(-50%);
+            background: #fff; color: #111; padding: 8px 12px;
+            font-family: 'Press Start 2P', monospace; font-size: 8px;
+            display: none; white-space: nowrap; z-index: 15; pointer-events: auto;
+            border: 3px solid #333; box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
+        }
+        .bubble::after { content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: #fff; }
+        .battle-badge {
+            position: absolute; top: -24px; right: -20px; color: #ffd54f; font-size: 20px;
+            text-shadow: 2px 2px 0 rgba(0,0,0,0.8);
+        }
+
+        .scenery-container { position: absolute; z-index: 2; user-select: none; }
+        .scenery-container img { display: block; width: 100%; height: 100%; pointer-events: none; image-rendering: pixelated; }
+        body.dev-mode .scenery-container { border: 2px dashed #00bcd4; }
+        body.dev-mode.dev-pointer .scenery-container { cursor: move; }
+        body.dev-mode:not(.dev-pointer) .scenery-container { pointer-events: none; }
+        .resize-handle { display: none; position: absolute; width: 12px; height: 12px; background: #00bcd4; border: 2px solid #fff; right: -6px; bottom: -6px; cursor: se-resize; z-index: 20; }
+        body.dev-mode.dev-pointer .resize-handle { display: block; }
+
+        .barrier { position: absolute; opacity: 0; pointer-events: none; }
+        body.dev-mode.dev-barrier .barrier { opacity: 0.15; background: #f44336; pointer-events: none; }
+        body.dev-mode.dev-pointer .barrier { opacity: 1; background: rgba(255,0,0,0.2); border: 2px dashed #f44336; z-index: 50; pointer-events: auto; cursor: move; }
+        body.dev-mode:not(.dev-pointer):not(.dev-barrier) .barrier { pointer-events: none; }
+
+        #dev-panel {
+            position: absolute; top: 12px; right: 12px; width: 280px; max-height: calc(100vh - 24px);
+            background: #111; border: 3px solid #9c27b0;
+            box-shadow: 0 6px 0 rgba(0,0,0,0.4);
+            padding: 12px; z-index: 50; display: none; overflow-y: auto;
+        }
+        #dev-panel h3 {
+            font-family: 'Press Start 2P', monospace; font-size: 9px;
+            color: #ce93d8; border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 8px;
+        }
+        .dev-section { margin-bottom: 10px; }
+        .dev-section-title {
+            font-family: 'Press Start 2P', monospace; font-size: 7px; color: #888;
+            text-transform: uppercase; margin-bottom: 4px; letter-spacing: 1px;
+        }
+        .dev-tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px; }
+        .dev-tool-btn {
+            font-family: 'Press Start 2P', monospace; font-size: 7px; padding: 8px 4px;
+            background: #1a1a2e; border: 2px solid #333; color: #aaa; cursor: pointer;
+            text-align: center; transition: all 0.1s;
+        }
+        .dev-tool-btn:hover { border-color: #666; color: #fff; }
+        .dev-tool-btn.active { border-color: #00e5ff; color: #00e5ff; background: #0a1a2e; }
+        .dev-tool-btn .tool-icon { font-size: 16px; display: block; margin-bottom: 4px; }
+        .dev-sub-panel { background: #0a0a14; padding: 10px; margin-top: 6px; border: 2px solid #222; }
+        .dev-prop-row { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+        .dev-prop-label { font-family: 'Press Start 2P', monospace; font-size: 7px; color: #888; min-width: 24px; }
+        .dev-prop-row input { width: 100% !important; padding: 5px 6px !important; font-size: 9px !important; }
+        .dev-prop-row select { width: 100% !important; padding: 5px 6px !important; font-size: 9px !important; }
+        .dev-npc-dialogue-list { max-height: 200px; overflow-y: auto; }
+        .dev-dialogue-entry { background: #0a0a14; border: 1px solid #333; padding: 8px; margin-bottom: 4px; }
+        .dev-dialogue-entry textarea { width: 100% !important; min-height: 40px !important; }
+        .dev-response-row { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
+        .dev-response-row input { flex: 1 !important; }
+        .dev-response-row select { width: 80px !important; flex: none !important; }
+
+        #mobile-controls { display: none; position: absolute; bottom: 20px; left: 20px; width: calc(100% - 40px); z-index: 20; justify-content: space-between; align-items: flex-end; }
+        .dpad { display: grid; grid-template-columns: repeat(3, 50px); grid-template-rows: repeat(3, 50px); gap: 3px; opacity: 0.5; }
+        .dpad button {
+            width: 50px; height: 50px; border: 3px solid #555;
+            background: #222; color: #fff; font-size: 18px; display: flex; justify-content: center; align-items: center;
+        }
+        .action-btn {
+            width: 68px; height: 68px; border: 3px solid #00bcd4;
+            background: #111; color: #00bcd4; font-family: 'Press Start 2P', monospace; font-size: 9px; opacity: 0.6;
+        }
+        @media (max-width: 768px) { #mobile-controls { display: flex; } }
+
+        .modal {
+            display: none; position: fixed; inset: 0; z-index: 200;
+            background: rgba(0,0,0,0.9); align-items: center; justify-content: center;
+        }
+        .modal.active { display: flex; }
+        .modal-box {
+            background: #111; border: 3px solid #333; padding: 24px;
+            text-align: center; min-width: 320px; max-width: 90vw; max-height: 85vh; overflow-y: auto;
+            box-shadow: 0 12px 0 rgba(0,0,0,0.5);
+        }
+        .modal-box h3 { font-family: 'Press Start 2P', monospace; font-size: 11px; margin-bottom: 12px; color: #fff; }
+
+        /* Skin preview */
+        .skin-preview-box {
+            width: 48px; height: 48px; image-rendering: pixelated; border: 2px solid #333;
+            background: #1a1a2e; margin: 4px auto; display: flex; align-items: center; justify-content: center;
+            overflow: hidden; flex-shrink: 0;
+        }
+        .skin-preview-box .sprite-sheet { width: 48px; height: 48px; transform: scale(0.9); }
+        .skin-select-row { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+        .skin-select-row select { flex: 1; }
+
+        /* Dialogue Bar (bottom RPG style) */
+        #dialogue-bar {
+            display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 80;
+            background: #111; border-top: 3px solid #333;
+            padding: 12px 16px; min-height: 100px;
+            box-shadow: 0 -4px 0 rgba(0,0,0,0.5);
+        }
+        #dialogue-bar.active { display: flex; gap: 16px; align-items: flex-start; }
+        #dialogue-portrait {
+            width: 96px; height: 96px; image-rendering: pixelated; border: 3px solid #333;
+            background: #1a1a2e; flex-shrink: 0; overflow: hidden; display: flex; align-items: center; justify-content: center;
+        }
+        #dialogue-portrait .sprite-sheet { width: 192px; height: 192px; transform: scale(0.5); transform-origin: top left; }
+        #dialogue-content { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+        #dialogue-name { font-family: 'Press Start 2P', monospace; font-size: 10px; color: #00e5ff; }
+        #dialogue-text { font-family: 'Press Start 2P', monospace; font-size: 9px; color: #ddd; line-height: 1.8; min-height: 28px; }
+        #dialogue-responses { display: flex; flex-wrap: wrap; gap: 6px; }
+        .dialogue-response-btn {
+            font-family: 'Press Start 2P', monospace; font-size: 8px; padding: 8px 14px;
+            background: #1a1a2e; border: 2px solid #444; color: #fff; cursor: pointer;
+            transition: all 0.1s;
+        }
+        .dialogue-response-btn:hover { border-color: #00e5ff; color: #00e5ff; background: #0a1a2e; }
+        .dialogue-response-btn.duel-btn { border-color: #f44336; color: #f44336; }
+        .dialogue-response-btn.duel-btn:hover { background: #2a0a0a; }
+
+        /* Skin Manager */
+        .skin-manager-item {
+            display: flex; align-items: center; gap: 10px; padding: 8px;
+            border: 2px solid #333; margin-bottom: 6px; background: #1a1a2e;
+        }
+        .skin-manager-item .skin-preview {
+            width: 48px; height: 48px; image-rendering: pixelated; border: 2px solid #444;
+            background: #111; flex-shrink: 0; overflow: hidden; display: flex; align-items: center; justify-content: center;
+        }
+        .skin-manager-item .skin-preview .sprite-sheet { width: 192px; height: 192px; transform: scale(0.25); transform-origin: top left; }
+        .skin-manager-item input { flex: 1; }
+        .skin-manager-item button { flex-shrink: 0; }
+
+        /* Battle Screen */
+        #battle-screen {
+            display: none; position: fixed; inset: 0;
+            background: #0a0a14; z-index: 60;
+            padding: 12px; overflow: hidden;
+        }
+        #battle-screen.active { display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
+        .arena-row { display: flex; align-items: center; gap: 12px; width: 100%; justify-content: center; }
+        .arena-combatant { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
+        .arena-sprite-box { width: 56px; height: 56px; image-rendering: pixelated; }
+        .arena-name { font-family: 'Press Start 2P', monospace; font-size: 10px; color: #aaa; }
+        .arena-name.mine { color: #00e5ff; }
+        .arena-bubble {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            background: #fff; color: #111;
+            padding: 5px 10px; font-family: 'Press Start 2P', monospace; font-size: 9px;
+            opacity: 0; transition: opacity 0.15s; border: 3px solid #333;
+            white-space: nowrap; z-index: 5; pointer-events: none;
+        }
+        .arena-bubble.show { opacity: 1; }
+        .arena-bubble.left { right: calc(100% + 8px); }
+        .arena-bubble.right { left: calc(100% + 8px); }
+        .arena-bubble::before { content: ''; position: absolute; top: 50%; transform: translateY(-50%); border: 5px solid transparent; }
+        .arena-bubble.left::before { right: -10px; border-left-color: #fff; }
+        .arena-bubble.right::before { left: -10px; border-right-color: #fff; }
+
+        .board-wrapper {
+            border: 5px solid #333; background: #111;
+            padding: 6px; position: relative;
+            box-shadow: 0 8px 0 rgba(0,0,0,0.4);
+            flex-shrink: 0;
+        }
+        .chess-board { display: grid; grid-template-columns: repeat(8, 36px); grid-template-rows: repeat(8, 36px); border: 2px solid #222; image-rendering: pixelated; }
+        @media (min-width: 768px) { .chess-board { grid-template-columns: repeat(8, 48px); grid-template-rows: repeat(8, 48px); } }
+        @media (min-height: 700px) { .chess-board { grid-template-columns: repeat(8, 42px); grid-template-rows: repeat(8, 42px); } }
+        @media (min-width: 768px) and (min-height: 700px) { .chess-board { grid-template-columns: repeat(8, 52px); grid-template-rows: repeat(8, 52px); } }
+
+        .cell { display: flex; justify-content: center; align-items: center; font-size: 28px; cursor: pointer; user-select: none; position: relative; }
+        @media (min-width: 768px) { .cell { font-size: 34px; } }
+        .cell.light { background: #ddd0b0; }
+        .cell.dark { background: #8b6d4a; }
+        .cell.selected { background: #bbcb2b !important; outline: 3px solid #fff; outline-offset: -3px; }
+        .cell.valid-move::after { content: ''; position: absolute; width: 26%; height: 26%; background: rgba(0,0,0,0.35); border-radius: 0; pointer-events: none; }
+        .cell.valid-capture::after { content: ''; position: absolute; width: 85%; height: 85%; border: 4px solid rgba(180,40,40,0.7); border-radius: 0; pointer-events: none; box-sizing: border-box; }
+
+        .piece { position: relative; z-index: 5; transition: transform 0.15s; filter: drop-shadow(2px 2px 0 rgba(0,0,0,0.5)); }
+        .piece:hover { transform: scale(1.08); }
+
+        .battle-controls {
+            display: flex; gap: 12px; align-items: center; justify-content: center;
+            width: 100%; padding: 4px 0; flex-shrink: 0;
+        }
+        .turn-badge {
+            font-family: 'Press Start 2P', monospace; font-size: 8px; padding: 8px 16px;
+            border: 3px solid #333; background: #111; color: #888; white-space: nowrap;
+        }
+        .turn-badge.my-turn { color: #66bb6a; border-color: #2e7d32; animation: pixelGlow 1s steps(2) infinite alternate; }
+        @keyframes pixelGlow { 0% { box-shadow: 0 0 0 #2e7d32; } 100% { box-shadow: 0 0 8px #2e7d32; } }
+
+        .fly-off { animation: flyOffAnim 0.5s steps(6) forwards; z-index: 20; pointer-events: none; }
+        @keyframes flyOffAnim { 0% { transform: translate(0,0) scale(1) rotate(0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(0.3) rotate(var(--rot)); opacity: 0; } }
+        @keyframes shakeBoard { 0% { transform: translate(6px,6px); } 25% { transform: translate(-6px,-6px); } 50% { transform: translate(6px,-6px); } 75% { transform: translate(-6px,6px); } 100% { transform: translate(0,0); } }
+        .anim-shake { animation: shakeBoard 0.25s steps(4) none; }
+        #flash-screen { position: fixed; inset: 0; background: #fff; z-index: 100; opacity: 0; pointer-events: none; }
+        .anim-flash { animation: flashAnim 0.15s steps(3) none; }
+        @keyframes flashAnim { 0% { opacity: 0.5; } 50% { opacity: 0.2; } 100% { opacity: 0; } }
+
+        .vfx { position: absolute; pointer-events: none; z-index: 10; inset: 0; display: flex; justify-content: center; align-items: center; }
+        .vfx-pawn::after { content: ''; position: absolute; width: 140%; height: 3px; background: #ffd54f; transform: rotate(45deg) scaleX(0); animation: slashAnim 0.2s steps(4) forwards; }
+        .vfx-knight::before { content: ''; position: absolute; width: 140%; height: 3px; background: #00e5ff; transform: rotate(45deg) scaleX(0); animation: slashAnim 0.15s steps(3) forwards; }
+        .vfx-knight::after { content: ''; position: absolute; width: 140%; height: 3px; background: #00e5ff; transform: rotate(-45deg) scaleX(0); animation: slashAnim 0.15s steps(3) forwards 0.06s; }
+        .vfx-bishop::after { content: ''; position: absolute; width: 20px; height: 200px; background: #ffd54f; transform: scaleY(0); animation: pillarAnim 0.25s steps(5) forwards; bottom: 0; }
+        .vfx-rook::after { content: ''; position: absolute; width: 160%; height: 160%; background: #ff9800; transform: scale(0); animation: impactAnim 0.2s steps(4) forwards; }
+        .vfx-queen::after { content: ''; position: absolute; width: 220%; height: 220%; background: #ce93d8; transform: scale(0); animation: impactAnim 0.25s steps(4) forwards; }
+        .vfx-promotion { box-shadow: inset 0 0 20px #ffd54f !important; animation: glowPulse 0.4s steps(4) infinite alternate; }
+        @keyframes slashAnim { 50% { transform: rotate(var(--rot, 45deg)) scaleX(1.5); } 100% { transform: rotate(var(--rot, 45deg)) scaleX(2); opacity: 0; } }
+        @keyframes impactAnim { 0% { transform: scale(0); opacity: 1; } 100% { transform: scale(1.3); opacity: 0; } }
+        @keyframes pillarAnim { 0% { transform: scaleY(0); opacity: 1; } 100% { transform: scaleY(1); opacity: 0; } }
+        @keyframes glowPulse { 0% { background-color: rgba(255,213,0,0.1); } 100% { background-color: rgba(255,213,0,0.4); } }
+
+        .toast {
+            position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+            padding: 10px 20px; font-family: 'Press Start 2P', monospace; font-size: 9px; z-index: 9999;
+            animation: toastIn 0.2s ease, toastOut 0.2s ease 2.5s forwards;
+            border: 3px solid; box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
+        }
+        .toast-error { background: #2a0a0a; color: #f44336; border-color: #b71c1c; }
+        .toast-success { background: #0a2a0a; color: #66bb6a; border-color: #2e7d32; }
+        .toast-info { background: #0a0a2a; color: #42a5f5; border-color: #1565c0; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%); } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
+
+        #connection-status {
+            position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+            padding: 6px 10px; font-family: 'Press Start 2P', monospace; font-size: 7px;
+            background: #111; border: 2px solid #333; display: none;
+        }
+        #connection-status.disconnected { display: block; border-color: #b71c1c; color: #f44336; }
+
+        .flex-row { display: flex; gap: 6px; align-items: center; }
+        .flex-row input[type="number"] { width: 60px !important; padding: 5px 6px !important; font-size: 9px !important; }
+        .flex-1 { flex: 1; }
+        .mt-2 { margin-top: 8px; }
+        .mb-1 { margin-bottom: 4px; }
+        .gap-2 { gap: 8px; }
+        .text-xs { font-size: 7px; }
+        .text-muted { color: #666; }
+    </style>
+</head>
+<body>
+    <div id="flash-screen"></div>
+    <div id="connection-status"></div>
+    <div class="loading-overlay" id="loading">
+        <div class="pixel-spinner"></div>
+        <div style="color:#555;font-family:'Press Start 2P',monospace;font-size:9px;">CONECTANDO...</div>
+    </div>
+
+    <!-- Main Menu -->
+    <div id="screen-main" class="screen active">
+        <div class="pixel-panel">
+            <h1 class="pixel-title">CHESSWORLD</h1>
+            <div class="pixel-subtitle">MUNDO VIRTUAL DE XADREZ</div>
+            <button class="pixel-btn btn-primary" onclick="nav('screen-play')">JOGAR</button>
+            <button class="pixel-btn btn-secondary" onclick="nav('screen-skin')">IMPORTAR SKIN</button>
+            <button class="pixel-btn btn-secondary" onclick="openSkinManager()">GERENCIAR SKINS</button>
+        </div>
+    </div>
+
+    <!-- Play Screen -->
+    <div id="screen-play" class="screen">
+        <div class="pixel-panel">
+            <div class="pixel-title" style="font-size:13px;">ENTRAR NO MUNDO</div>
+            <div class="pixel-subtitle">ESCOLHA SEU NOME E APARENCIA</div>
+            <input type="text" class="pixel-input" id="username" placeholder="SEU NOME (12 CARAC.)" maxlength="12" autofocus>
+            <div class="skin-select-row">
+                <select class="pixel-input" id="skin-select"><option value="">SELECIONE UMA SKIN</option></select>
+            </div>
+            <div id="skin-preview-container" class="skin-preview-box" style="display:none;"></div>
+            <div class="color-picker" id="color-picker">
+                <div class="color-opt" style="background:#888" data-c="#888"></div>
+                <div class="color-opt" style="background:#F44336" data-c="#F44336"></div>
+                <div class="color-opt" style="background:#4CAF50" data-c="#4CAF50"></div>
+                <div class="color-opt" style="background:#FF9800" data-c="#FF9800"></div>
+                <div class="color-opt" style="background:#9C27B0" data-c="#9C27B0"></div>
+                <div class="color-opt" style="background:#00BCD4" data-c="#00BCD4"></div>
+                <div class="color-opt" style="background:#E91E63" data-c="#E91E63"></div>
+            </div>
+            <button class="pixel-btn btn-success" id="btn-login">ENTRAR NO MUNDO</button>
+            <button class="pixel-btn btn-secondary" onclick="nav('screen-main')">VOLTAR</button>
+        </div>
+    </div>
+
+    <!-- Skin Upload Screen -->
+    <div id="screen-skin" class="screen">
+        <div class="pixel-panel">
+            <div class="pixel-title" style="font-size:13px;">UPLOAD DE SKIN</div>
+            <div class="pixel-subtitle">SPRITESHEET 4x4 (RPG MAKER)</div>
+            <input type="text" class="pixel-input" id="upload-skin-name" placeholder="NOME DA SKIN" maxlength="30">
+            <input type="file" class="pixel-input" id="upload-skin-file" accept="image/png, image/gif" style="padding:8px;">
+            <button class="pixel-btn btn-success" id="btn-submit-skin">ENVIAR</button>
+            <button class="pixel-btn btn-secondary" onclick="nav('screen-main')">VOLTAR</button>
+        </div>
+    </div>
+
+    <!-- Skin Manager Screen -->
+    <div id="screen-skin-manager" class="screen">
+        <div class="pixel-panel" style="max-width:500px;">
+            <div class="pixel-title" style="font-size:13px;">GERENCIAR SKINS</div>
+            <div id="skin-manager-list" style="max-height:300px;overflow-y:auto;margin:8px 0;"></div>
+            <button class="pixel-btn btn-secondary" onclick="nav('screen-main')">VOLTAR</button>
+        </div>
+    </div>
+
+    <!-- UI Layer -->
+    <div id="ui-layer">
+        <div><span id="my-name"></span></div>
+        <input type="text" class="pixel-input" id="chat-input" placeholder="ENTER PARA FALAR..." maxlength="200">
+        <div style="display:flex;gap:4px;">
+            <button class="pixel-btn btn-secondary btn-sm" id="btn-bgm-toggle">SOM:ON</button>
+            <button class="pixel-btn btn-secondary btn-sm" id="btn-dev-toggle">DEV</button>
+        </div>
+    </div>
+
+    <!-- Dev Panel -->
+    <div id="dev-panel">
+        <h3>PAINEL DEV</h3>
+        <div class="dev-section">
+            <div class="dev-section-title">FERRAMENTA</div>
+            <div class="dev-tool-grid">
+                <button class="dev-tool-btn active" data-tool="pointer"><span class="tool-icon">&#9758;</span>SELECIONAR</button>
+                <button class="dev-tool-btn" data-tool="barrier"><span class="tool-icon">&#9632;</span>BARREIRA</button>
+                <button class="dev-tool-btn" data-tool="npc"><span class="tool-icon">&#9786;</span>NPC</button>
+                <button class="dev-tool-btn" data-tool="scenery"><span class="tool-icon">&#9968;</span>CENARIO</button>
+            </div>
+        </div>
+        <div id="dev-scenery-tools" class="dev-sub-panel" style="display:none;">
+            <div class="dev-section-title">CENARIO</div>
+            <input type="file" class="pixel-input" id="dev-scenery-file" accept="image/png, image/gif" style="padding:6px;font-size:8px;">
+            <button class="pixel-btn btn-primary btn-sm" id="btn-dev-upload-scenery">ENVIAR</button>
+            <hr style="border:0;border-top:1px solid #222;margin:6px 0;">
+            <select class="pixel-input" id="dev-scenery-select" style="padding:6px;font-size:8px;"></select>
+            <div class="flex-row mt-2">
+                <span class="dev-prop-label">L</span><input type="number" class="pixel-input" id="sce-w" value="64">
+                <span class="dev-prop-label">A</span><input type="number" class="pixel-input" id="sce-h" value="64">
+                <span class="dev-prop-label">Z</span><input type="number" class="pixel-input" id="sce-z" value="1">
+            </div>
+        </div>
+        <div id="dev-props" class="dev-sub-panel" style="display:none;">
+            <div class="dev-section-title">PROPRIEDADES</div>
+            <div id="dev-props-content"></div>
+            <div style="display:flex;gap:4px;margin-top:6px;">
+                <button class="pixel-btn btn-primary btn-sm flex-1" id="btn-props-apply">APLICAR</button>
+                <button class="pixel-btn btn-danger btn-sm" id="btn-props-delete">DEL</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-world" style="display:none;"></div>
+
+    <!-- Dialogue Bar -->
+    <div id="dialogue-bar">
+        <div id="dialogue-portrait"></div>
+        <div id="dialogue-content">
+            <div id="dialogue-name"></div>
+            <div id="dialogue-text"></div>
+            <div id="dialogue-responses"></div>
+        </div>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div id="mobile-controls">
+        <div class="dpad">
+            <div></div><button id="btn-up">^</button><div></div>
+            <button id="btn-left"><</button><div></div><button id="btn-right">></button>
+            <div></div><button id="btn-down">v</button><div></div>
+        </div>
+        <button class="action-btn" id="btn-action">ACAO</button>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal-npc" class="modal">
+        <div class="modal-box" style="min-width:380px;">
+            <h3>CRIAR NPC</h3>
+            <input type="text" class="pixel-input" id="npc-name" placeholder="NOME" maxlength="30">
+            <div class="skin-select-row">
+                <select class="pixel-input" id="npc-skin-select"><option value="">SKIN</option></select>
+            </div>
+            <div id="npc-skin-preview" class="skin-preview-box" style="display:none;"></div>
+            <div class="flex-row mt-2 mb-1">
+                <span class="dev-prop-label">DIRECAO</span>
+                <select class="pixel-input" id="npc-dir-select">
+                    <option value="down">BAIXO</option>
+                    <option value="up">CIMA</option>
+                    <option value="left">ESQUERDA</option>
+                    <option value="right">DIREITA</option>
+                </select>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;justify-content:center;margin:6px 0;font-family:'Press Start 2P',monospace;font-size:8px;cursor:pointer;color:#aaa;">
+                <input type="checkbox" id="npc-isbot" style="width:auto;margin:0;"> BOT DE XADREZ?
+            </label>
+            <select class="pixel-input" id="npc-botlevel" style="display:none;">
+                <option value="1">NIVEL 1 (FACIL)</option>
+                <option value="2">NIVEL 2 (MEDIO)</option>
+                <option value="3">NIVEL 3 (DIFICIL)</option>
+                <option value="4">NIVEL 4 (STOCKFISH)</option>
+            </select>
+            <div class="dev-section mt-2">
+                <div class="dev-section-title">DIALOGOS</div>
+                <div id="npc-dialogue-editor"></div>
+                <button class="pixel-btn btn-secondary btn-sm mt-2" id="btn-add-dialogue">+ ADICIONAR DIALOGO</button>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:10px;">
+                <button class="pixel-btn btn-success flex-1" id="btn-create-npc">CRIAR</button>
+                <button class="pixel-btn btn-danger flex-1" onclick="closeModal('modal-npc')">CANCELAR</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-send" class="modal">
+        <div class="modal-box">
+            <h3>DESAFIAR <span id="target-name"></span>?</h3>
+            <p style="color:#666;font-family:'Press Start 2P',monospace;font-size:8px;margin-bottom:14px;">UM JOGO SERA INICIADO</p>
+            <div style="display:flex;gap:6px;">
+                <button class="pixel-btn btn-success flex-1" id="btn-send-challenge">DESAFIAR</button>
+                <button class="pixel-btn btn-danger flex-1" onclick="closeModal('modal-send')">CANCELAR</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-receive" class="modal">
+        <div class="modal-box">
+            <h3><span id="challenger-name"></span> DESAFIOU VOCE!</h3>
+            <p style="color:#666;font-family:'Press Start 2P',monospace;font-size:8px;margin-bottom:14px;">ACEITAR O DUELO?</p>
+            <div style="display:flex;gap:6px;">
+                <button class="pixel-btn btn-success flex-1" id="btn-accept">ACEITAR</button>
+                <button class="pixel-btn btn-danger flex-1" id="btn-decline">RECUSAR</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Battle Screen -->
+    <div id="battle-screen">
+        <div class="arena-row" style="flex-shrink:0;">
+            <div class="arena-combatant" id="arena-top">
+                <span id="opp-name" class="arena-name">OPONENTE</span>
+                <div id="opp-sprite" class="arena-sprite-box"></div>
+                <div id="opp-bubble" class="arena-bubble left"></div>
+            </div>
+        </div>
+        <div class="board-wrapper" id="board-wrapper">
+            <div class="chess-board" id="chess-board"></div>
+        </div>
+        <div class="arena-row" style="flex-shrink:0;">
+            <div class="arena-combatant" id="arena-bottom">
+                <div id="my-sprite" class="arena-sprite-box"></div>
+                <span id="my-arena-name" class="arena-name mine">VOCE</span>
+                <div id="my-bubble" class="arena-bubble right"></div>
+            </div>
+        </div>
+        <div class="battle-controls">
+            <div id="turn-badge" class="turn-badge">AGUARDANDO...</div>
+            <button class="pixel-btn btn-sm" id="btn-bgm">MUSICA:ON</button>
+            <button class="pixel-btn btn-danger btn-sm" id="btn-forfeit">DESISTIR</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/client.js"></script>
+</body>
+</html>
