@@ -7,11 +7,16 @@
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
-  "keywords": ["chess", "multiplayer", "game"],
+  "keywords": [
+    "chess",
+    "multiplayer",
+    "game"
+  ],
   "author": "IsaacDeMelo",
   "license": "ISC",
   "dependencies": {
     "express": "^5.2.1",
+    "mongodb": "^7.2.0",
     "multer": "^2.1.1",
     "socket.io": "^4.8.3"
   }

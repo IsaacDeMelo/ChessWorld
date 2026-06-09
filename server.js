@@ -2,11 +2,14 @@ const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http);
+const { MongoClient } = require('mongodb');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 
 const PORT = process.env.PORT || 3000;
+const MONGO_URI = 'mongodb+srv://kingkongdev2005_db_user:yYtXsbfrRLoIWq4O@cluster0.raovnbb.mongodb.net/?appName=Cluster0';
+const DB_NAME = 'chessworld';
 
 const uploadDir = path.join(__dirname, 'public/uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -17,95 +20,58 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
+app.use(express.json());
 app.use(express.static('public'));
 
-class Database {
-    constructor() {
-        this.path = path.join(__dirname, 'data/db.json');
-        const dir = path.dirname(this.path);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        this.data = this.load();
-        this.defaults();
-        this.save();
-    }
-    load() {
-        if (!fs.existsSync(this.path)) return {};
-        try { return JSON.parse(fs.readFileSync(this.path, 'utf8')); } catch { return {}; }
-    }
-    save() { fs.writeFileSync(this.path, JSON.stringify(this.data, null, 2)); }
-    defaults() {
-        const d = this.data;
-        if (!d.players) d.players = [];
-        if (!d.objects) d.objects = [];
-        if (!d.skins) d.skins = [];
-        if (!d.npcs) d.npcs = [];
-        if (!d.sceneryTemplates) d.sceneryTemplates = [];
-        if (!d.sceneryMap) d.sceneryMap = [];
-        if (!d.pieceSprites) d.pieceSprites = {};
-        if (!d.spriteSheets) d.spriteSheets = {};
-        d.npcs.forEach(n => {
-            if (!n.dir) n.dir = 'down';
-            if (!Array.isArray(n.dialogues)) {
-                n.dialogues = [{ text: n.dialogue || '...', responses: [{ text: 'Fechar', action: 'close' }] }];
-            }
-            if (n.isBot && n.dialogues.every(d => !d.responses || d.responses.every(r => r.action !== 'duel'))) {
-                n.dialogues.forEach(d => {
-                    if (!d.responses) d.responses = [];
-                    if (!d.responses.some(r => r.action === 'duel')) {
-                        d.responses.push({ text: 'Desafiar (Bot)', action: 'duel' });
-                    }
-                });
-            }
-        });
-    }
-    loginOrRegister(username, color, skin) {
-        let p = this.data.players.find(p => p.username === username);
-        if (!p) {
-            p = { username, xp: 0, level: 1, x: 100, y: 100, color: color || '#888', skin: skin || '' };
-            this.data.players.push(p);
-        } else {
-            if (color) p.color = color;
-            if (skin) p.skin = skin;
-        }
-        this.save();
-        return p;
-    }
+let db;
+
+async function connectDB() {
+    const client = new MongoClient(MONGO_URI);
+    await client.connect();
+    db = client.db(DB_NAME);
+    console.log('MongoDB conectado:', DB_NAME);
+    await db.collection('players').createIndex({ username: 1 }, { unique: true });
 }
 
-const db = new Database();
-
-app.get('/api/data', (_, res) => {
-    res.json({ skins: db.data.skins, scenery: db.data.sceneryTemplates });
+app.get('/api/data', async (_, res) => {
+    const [skins, sceneryTemplates] = await Promise.all([
+        db.collection('skins').find().toArray(),
+        db.collection('scenery_templates').find().toArray()
+    ]);
+    res.json({ skins, scenery: sceneryTemplates });
 });
 
-app.post('/api/upload', upload.single('image'), (req, res) => {
+app.post('/api/upload', upload.single('image'), async (req, res) => {
     if (!req.file) return res.json({ success: false, error: 'Sem arquivo' });
     const type = req.body.type;
     const name = (req.body.name ? String(req.body.name) : `Img_${Date.now()}`).substring(0, 50);
-    const newItem = { id: Date.now().toString(), name, url: `/uploads/${req.file.filename}` };
-    if (type === 'skin') db.data.skins.push(newItem);
-    else db.data.sceneryTemplates.push(newItem);
-    db.save();
-    res.json({ success: true, item: newItem, type });
+    const item = { name, url: `/uploads/${req.file.filename}` };
+    if (type === 'skin') await db.collection('skins').insertOne(item);
+    else await db.collection('scenery_templates').insertOne(item);
+    res.json({ success: true, item, type });
 });
 
-app.post('/api/skin/rename', (req, res) => {
+app.post('/api/skin/rename', async (req, res) => {
     const { id, newName } = req.body;
     if (!id || !newName) return res.json({ success: false, error: 'Dados invalidos' });
-    const skin = db.data.skins.find(s => s.id === id);
-    if (!skin) return res.json({ success: false, error: 'Skin nao encontrada' });
-    skin.name = newName.substring(0, 50);
-    db.save();
-    res.json({ success: true, skin });
+    const { ObjectId } = require('mongodb');
+    let query;
+    try { query = { _id: new ObjectId(id) }; } catch { query = { id }; }
+    const result = await db.collection('skins').findOneAndUpdate(
+        query, { $set: { name: newName.substring(0, 50) } }, { returnDocument: 'after' }
+    );
+    if (!result) return res.json({ success: false, error: 'Skin nao encontrada' });
+    res.json({ success: true, skin: result });
 });
 
-app.post('/api/skin/delete', (req, res) => {
+app.post('/api/skin/delete', async (req, res) => {
     const { id } = req.body;
     if (!id) return res.json({ success: false, error: 'ID invalido' });
-    const idx = db.data.skins.findIndex(s => s.id === id);
-    if (idx === -1) return res.json({ success: false, error: 'Skin nao encontrada' });
-    db.data.skins.splice(idx, 1);
-    db.save();
+    const { ObjectId } = require('mongodb');
+    let query;
+    try { query = { _id: new ObjectId(id) }; } catch { query = { id }; }
+    const result = await db.collection('skins').deleteOne(query);
+    if (result.deletedCount === 0) return res.json({ success: false, error: 'Skin nao encontrada' });
     res.json({ success: true });
 });
 
@@ -349,18 +315,14 @@ class ChessGame {
                 const fen = this.boardToFEN();
                 let moveUCI = null;
 
-                // 1) Lichess Cloud Eval (free, millions of positions)
                 try {
                     const r = await fetch(`https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fen)}&multiPv=1`);
                     if (r.ok) {
                         const d = await r.json();
-                        if (d.pvs && d.pvs[0] && d.pvs[0].moves) {
-                            moveUCI = d.pvs[0].moves.split(' ')[0];
-                        }
+                        if (d.pvs && d.pvs[0] && d.pvs[0].moves) moveUCI = d.pvs[0].moves.split(' ')[0];
                     }
                 } catch (_) {}
 
-                // 2) stockfish.online fallback
                 if (!moveUCI) {
                     try {
                         const r = await fetch(`https://stockfish.online/api/s/v2.php?fen=${encodeURIComponent(fen)}&depth=${this.botLevel >= 4 ? 14 : 10}`);
@@ -407,8 +369,7 @@ class ChessGame {
 class GameEngine {
     constructor() { this.players = {}; this.battles = {}; this.challenges = {}; this.bCounter = 0; }
     addPlayer(id, data) {
-        const p = db.loginOrRegister(data.username, data.color, data.skin);
-        this.players[id] = { id, ...p, inBattle: false, battleId: null, dir: 'down', isMoving: false };
+        this.players[id] = { id, ...data, inBattle: false, battleId: null, dir: 'down', isMoving: false };
     }
     removePlayer(id) {
         if (this.players[id] && this.players[id].battleId) this.endBattle(this.players[id].battleId, id);
@@ -437,21 +398,36 @@ class GameEngine {
 const engine = new GameEngine();
 
 io.on('connection', (socket) => {
-    socket.on('login', (data) => {
+    socket.on('login', async (data) => {
         if (!data || typeof data.username !== 'string') return;
         const username = data.username.trim().substring(0, 12) || 'Convidado';
         const color = typeof data.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(data.color) ? data.color : '#888';
         let skin = typeof data.skin === 'string' ? data.skin.substring(0, 50) : '';
-        if (!skin && db.data.skins.length > 0) skin = db.data.skins[0].name;
-        engine.addPlayer(socket.id, { username, color, skin });
+        if (!skin) {
+            const firstSkin = await db.collection('skins').findOne({});
+            if (firstSkin) skin = firstSkin.name;
+        }
+        let player = await db.collection('players').findOne({ username });
+        if (!player) {
+            player = { username, skin, color, x: 100, y: 100 };
+            await db.collection('players').insertOne(player);
+        } else {
+            if (color) player.color = color;
+            if (skin) player.skin = skin;
+            await db.collection('players').updateOne({ username }, { $set: { skin: player.skin, color: player.color } });
+        }
+        engine.addPlayer(socket.id, { username, color, skin, x: player.x || 100, y: player.y || 100 });
+        const [skins, npcs, sceneries, barriers, sceneryTemplates] = await Promise.all([
+            db.collection('skins').find().toArray(),
+            db.collection('npcs').find().toArray(),
+            db.collection('scenery_map').find().toArray(),
+            db.collection('barriers').find().toArray(),
+            db.collection('scenery_templates').find().toArray()
+        ]);
         socket.emit('login_success', {
             user: engine.players[socket.id],
             players: engine.players,
-            barriers: db.data.objects,
-            npcs: db.data.npcs,
-            sceneries: db.data.sceneryMap || [],
-            sceneryTemplates: db.data.sceneryTemplates || [],
-            skins: db.data.skins
+            barriers, npcs, sceneries, sceneryTemplates, skins
         });
         socket.broadcast.emit('player_joined', engine.players[socket.id]);
     });
@@ -474,34 +450,31 @@ io.on('connection', (socket) => {
     });
 
     // --- Barriers ---
-    socket.on('create_barrier', (data) => {
+    socket.on('create_barrier', async (data) => {
         if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return;
         if (typeof data.w !== 'number' || typeof data.h !== 'number') return;
-        if (data.w < 5 || data.h < 5 || data.w > 2000 || data.h > 2000) return;
         data.id = 'b_' + Date.now();
-        db.data.objects.push(data); db.save();
+        await db.collection('barriers').insertOne(data);
         io.emit('new_barrier', data);
     });
-    socket.on('delete_barrier', (id) => {
+    socket.on('delete_barrier', async (id) => {
         if (typeof id !== 'string') return;
-        db.data.objects = db.data.objects.filter(b => b.id !== id); db.save();
+        await db.collection('barriers').deleteOne({ id });
         io.emit('barrier_deleted', id);
     });
-    socket.on('update_barrier', (data) => {
+    socket.on('update_barrier', async (data) => {
         if (!data || !data.id) return;
-        const b = db.data.objects.find(item => item.id === data.id);
-        if (b) {
-            if (typeof data.x === 'number') b.x = data.x;
-            if (typeof data.y === 'number') b.y = data.y;
-            if (typeof data.w === 'number') b.w = data.w;
-            if (typeof data.h === 'number') b.h = data.h;
-            db.save();
-            io.emit('barrier_updated', b);
-        }
+        const update = {};
+        if (typeof data.x === 'number') update.x = data.x;
+        if (typeof data.y === 'number') update.y = data.y;
+        if (typeof data.w === 'number') update.w = data.w;
+        if (typeof data.h === 'number') update.h = data.h;
+        await db.collection('barriers').updateOne({ id: data.id }, { $set: update });
+        io.emit('barrier_updated', { ...data, ...update });
     });
 
     // --- NPCs ---
-    socket.on('create_npc', (data) => {
+    socket.on('create_npc', async (data) => {
         if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return;
         data.id = 'npc_' + Date.now();
         data.name = String(data.name || 'NPC').substring(0, 30);
@@ -519,54 +492,49 @@ io.on('connection', (socket) => {
             });
         });
         delete data.dialogue;
-        db.data.npcs.push(data); db.save();
+        await db.collection('npcs').insertOne(data);
         io.emit('new_npc', data);
     });
-    socket.on('delete_npc', (id) => {
+    socket.on('delete_npc', async (id) => {
         if (typeof id !== 'string') return;
-        db.data.npcs = db.data.npcs.filter(n => n.id !== id); db.save();
+        await db.collection('npcs').deleteOne({ id });
         io.emit('npc_deleted', id);
     });
-    socket.on('update_npc', (data) => {
+    socket.on('update_npc', async (data) => {
         if (!data || !data.id) return;
-        const npc = db.data.npcs.find(n => n.id === data.id);
-        if (npc) {
-            if (typeof data.x === 'number') npc.x = data.x;
-            if (typeof data.y === 'number') npc.y = data.y;
-            if (typeof data.name === 'string') npc.name = data.name.substring(0, 30);
-            if (typeof data.skin === 'string') npc.skin = data.skin.substring(0, 50);
-            if (['up', 'down', 'left', 'right'].includes(data.dir)) npc.dir = data.dir;
-            if (Array.isArray(data.dialogues)) npc.dialogues = data.dialogues;
-            db.save();
-            io.emit('npc_updated', npc);
-        }
+        const update = {};
+        if (typeof data.x === 'number') update.x = data.x;
+        if (typeof data.y === 'number') update.y = data.y;
+        if (typeof data.name === 'string') update.name = data.name.substring(0, 30);
+        if (typeof data.skin === 'string') update.skin = data.skin.substring(0, 50);
+        if (['up', 'down', 'left', 'right'].includes(data.dir)) update.dir = data.dir;
+        if (Array.isArray(data.dialogues)) update.dialogues = data.dialogues;
+        await db.collection('npcs').updateOne({ id: data.id }, { $set: update });
+        io.emit('npc_updated', { id: data.id, ...update });
     });
 
     // --- Scenery ---
-    socket.on('place_scenery', (data) => {
+    socket.on('place_scenery', async (data) => {
         if (!data) return;
         data.id = 'sce_' + Date.now();
-        if (!db.data.sceneryMap) db.data.sceneryMap = [];
-        db.data.sceneryMap.push(data); db.save();
+        await db.collection('scenery_map').insertOne(data);
         io.emit('new_scenery', data);
     });
-    socket.on('delete_scenery', (id) => {
-        if (typeof id !== 'string' || !db.data.sceneryMap) return;
-        db.data.sceneryMap = db.data.sceneryMap.filter(s => s.id !== id); db.save();
+    socket.on('delete_scenery', async (id) => {
+        if (typeof id !== 'string') return;
+        await db.collection('scenery_map').deleteOne({ id });
         io.emit('scenery_deleted', id);
     });
-    socket.on('update_scenery', (data) => {
-        if (!data || !db.data.sceneryMap) return;
-        const s = db.data.sceneryMap.find(item => item.id === data.id);
-        if (s) {
-            if (typeof data.w === 'number') s.w = data.w;
-            if (typeof data.h === 'number') s.h = data.h;
-            if (typeof data.x === 'number') s.x = data.x;
-            if (typeof data.y === 'number') s.y = data.y;
-            if (typeof data.z === 'number') s.z = data.z;
-            db.save();
-            io.emit('scenery_updated', s);
-        }
+    socket.on('update_scenery', async (data) => {
+        if (!data || !data.id) return;
+        const update = {};
+        if (typeof data.w === 'number') update.w = data.w;
+        if (typeof data.h === 'number') update.h = data.h;
+        if (typeof data.x === 'number') update.x = data.x;
+        if (typeof data.y === 'number') update.y = data.y;
+        if (typeof data.z === 'number') update.z = data.z;
+        await db.collection('scenery_map').updateOne({ id: data.id }, { $set: update });
+        io.emit('scenery_updated', { id: data.id, ...update });
     });
 
     // --- Challenges & Battle ---
@@ -591,14 +559,15 @@ io.on('connection', (socket) => {
     });
     socket.on('challenge_npc', (npcId) => {
         if (typeof npcId !== 'string') return;
-        const npc = db.data.npcs.find(n => n.id === npcId);
-        if (npc && npc.isBot) {
-            const battle = engine.acceptChallenge(socket.id, npc.id, true, npc.botLevel);
-            if (battle) {
-                socket.emit('battle_start', { mySide: 'w', opp: { name: npc.name, skin: npc.skin, color: '#f44336' }, state: battle });
-                io.emit('player_in_battle', { p1Id: socket.id, p2Id: null });
+        db.collection('npcs').findOne({ id: npcId }).then(npc => {
+            if (npc && npc.isBot) {
+                const battle = engine.acceptChallenge(socket.id, npc.id, true, npc.botLevel);
+                if (battle) {
+                    socket.emit('battle_start', { mySide: 'w', opp: { name: npc.name, skin: npc.skin, color: '#f44336' }, state: battle });
+                    io.emit('player_in_battle', { p1Id: socket.id, p2Id: null });
+                }
             }
-        }
+        });
     });
     socket.on('chess_move', (data) => {
         if (!data) return;
@@ -634,15 +603,18 @@ io.on('connection', (socket) => {
         socket.emit('battle_end', { winner: false });
         io.emit('player_left_battle', { p1Id: b.p1Id, p2Id: b.isBot ? null : b.p2Id });
     });
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
         const p = engine.players[socket.id];
-        if (p && p.battleId) {
-            const b = engine.battles[p.battleId];
-            if (b) {
-                const winnerId = engine.endBattle(p.battleId, socket.id);
-                if (winnerId && !b.isBot) io.to(winnerId).emit('battle_end', { winner: true });
-                io.emit('player_left_battle', { p1Id: b.p1Id, p2Id: b.isBot ? null : b.p2Id });
-            } else { p.inBattle = false; p.battleId = null; }
+        if (p) {
+            if (p.battleId) {
+                const b = engine.battles[p.battleId];
+                if (b) {
+                    const winnerId = engine.endBattle(p.battleId, socket.id);
+                    if (winnerId && !b.isBot) io.to(winnerId).emit('battle_end', { winner: true });
+                    io.emit('player_left_battle', { p1Id: b.p1Id, p2Id: b.isBot ? null : b.p2Id });
+                }
+            }
+            if (p.username) await db.collection('players').updateOne({ username: p.username }, { $set: { x: p.x, y: p.y } });
         }
         engine.removePlayer(socket.id);
         io.emit('player_left', socket.id);
@@ -657,4 +629,9 @@ io.on('connection', (socket) => {
     }
 });
 
-http.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+connectDB().then(() => {
+    http.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+}).catch(err => {
+    console.error('Erro ao conectar MongoDB:', err);
+    process.exit(1);
+});
