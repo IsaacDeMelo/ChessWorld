@@ -1358,22 +1358,25 @@ function setupSceneryInteractions(el, s) {
         window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
     });
 }
-document.getElementById('npc-isbot').onchange = (e) => {
-    const show = e.target.checked;
-    document.getElementById('npc-botlevel').style.display = show ? 'block' : 'none';
-    document.getElementById('npc-piece-options').style.display = show ? 'flex' : 'none';
-    if (show) {
-        const sel = document.getElementById('npc-piece-type');
-        const current = sel.value;
-        sel.innerHTML = '<option value="classic">CLASSICO</option><option value="pixel">PIXEL</option><option value="minimal">MINIMAL</option>';
-        (window.availablePiecePacks || []).forEach(pack => {
-            const opt = document.createElement('option');
-            opt.value = 'pack:' + pack.name; opt.textContent = 'PACK: ' + pack.name;
-            sel.appendChild(opt);
-        });
-        if (current) sel.value = current;
-    }
-};
+const npcIsBot = document.getElementById('npc-isbot');
+if (npcIsBot) {
+    npcIsBot.onchange = (e) => {
+        const show = e.target.checked;
+        document.getElementById('npc-botlevel').style.display = show ? 'block' : 'none';
+        document.getElementById('npc-piece-options').style.display = show ? 'flex' : 'none';
+        if (show) {
+            const sel = document.getElementById('npc-piece-type');
+            const current = sel.value;
+            sel.innerHTML = '<option value="classic">CLASSICO</option><option value="pixel">PIXEL</option><option value="minimal">MINIMAL</option>';
+            (window.availablePiecePacks || []).forEach(pack => {
+                const opt = document.createElement('option');
+                opt.value = 'pack:' + pack.name; opt.textContent = 'PACK: ' + pack.name;
+                sel.appendChild(opt);
+            });
+            if (current) sel.value = current;
+        }
+    };
+}
 let npcDialogueList = [{ text: '', responses: [] }];
 const dialogueEditor = document.getElementById('npc-dialogue-editor');
 function renderNpcDialogueEditor() {
