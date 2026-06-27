@@ -121,11 +121,17 @@
         @keyframes spin { to { transform: rotate(360deg); } }
 
         #game-world {
-            position: absolute; inset: 0; transform-origin: center center; z-index: 1;
-            background-color: #0a0a14;
-            background-image: url("data:image/svg+xml,%3Csvg width='32' height='32' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='32' height='32' fill='%230a0a14'/%3E%3Crect x='0' y='0' width='1' height='32' fill='%23151520'/%3E%3Crect x='0' y='0' width='32' height='1' fill='%23151520'/%3E%3C/svg%3E");
-            background-size: 32px 32px;
+            position: absolute; 
+            width: 5000px; /* Grande o suficiente para parecer infinito */
+            height: 5000px;
+            left: -1500px; /* Centralizado inicialmente */
+            top: -1500px;
+            transform-origin: center center; z-index: 1;
+            background-color: #1a3a2a; /* Verde mais estilo grama/tabuleiro */
+            background-image: radial-gradient(circle, #2e7d32 1px, transparent 1px);
+            background-size: 64px 64px;
         }
+
 
         #ui-layer {
             position: absolute; top: 12px; left: 12px; z-index: 10;
@@ -230,10 +236,11 @@
         }
         @media (max-width: 768px) { #mobile-controls { display: flex; } }
 
-        .modal {
-            display: none; position: fixed; inset: 0; z-index: 200;
-            background: rgba(0,0,0,0.9); align-items: center; justify-content: center;
-        }
+        /* Aumentando z-index para garantir visibilidade */
+        .modal { z-index: 9999; }
+        #dev-panel { z-index: 9000; }
+        #game-world { z-index: 1; }
+        .screen { z-index: 100; }
         .modal.active { display: flex; }
         .modal-box {
             background: #111; border: 3px solid #333; padding: 24px;
@@ -630,7 +637,9 @@
             </div>
         </div>
         <div class="dev-section">
-            <div class="dev-section-title">CRAZY MODE</div>
+            <div class="dev-section-title">ADMIN TOOLS</div>
+            <button class="dev-tool-btn" onclick="showModal('modal-item-creator')">CRIAR ITEM</button>
+        </div>
             <label style="display:flex;align-items:center;gap:8px;justify-content:center;cursor:pointer;color:#ffd54f;font-family:'Press Start 2P',monospace;font-size:8px;">
                 <input type="checkbox" id="dev-crazy-mode-toggle" style="width:auto;"> MODO LOUCO
             </label>
@@ -704,12 +713,13 @@
         <button class="action-btn" id="btn-action">ACAO</button>
     </div>
 
-    <!-- Inventory Modal -->
-    <div id="modal-inventory" class="modal">
-        <div class="modal-box" style="min-width: 300px;">
-            <h3>INVENTARIO</h3>
-            <div id="inventory-list" style="margin: 10px 0; text-align: left; font-size: 8px; font-family: 'Press Start 2P', monospace;"></div>
-            <button class="pixel-btn btn-secondary" onclick="closeModal('modal-inventory')">FECHAR</button>
+    <!-- Item Creator Modal -->
+    <div id="modal-item-creator" class="modal">
+        <div class="modal-box">
+            <h3>CRIAR ITEM</h3>
+            <input type="text" class="pixel-input" id="item-id" placeholder="ID DO ITEM (EX: ESPADA_DE_PRATA)">
+            <button class="pixel-btn btn-success" onclick="createItem()">CRIAR NO BANCO</button>
+            <button class="pixel-btn btn-secondary" onclick="closeModal('modal-item-creator')">FECHAR</button>
         </div>
     </div>
         <div class="modal-box" style="min-width:380px;">
@@ -729,8 +739,12 @@
                 </select>
             </div>
             <label style="display:flex;align-items:center;gap:8px;justify-content:center;margin:6px 0;font-family:'Press Start 2P',monospace;font-size:8px;cursor:pointer;color:#aaa;">
-                <input type="checkbox" id="npc-isbot" style="width:auto;margin:0;"> BOT DE XADREZ?
+                <input type="checkbox" id="npc-isaggro" style="width:auto;margin:0;"> AGRESSIVO (MONSTRO)
             </label>
+            <div class="flex-row mt-2 mb-1" id="npc-aggro-options" style="display:none;">
+                <span class="dev-prop-label">RAIO</span>
+                <input type="number" class="pixel-input" id="npc-aggro-radius" value="200" style="flex:1;">
+            </div>
             <select class="pixel-input" id="npc-botlevel" style="display:none;">
                 <option value="1">NIVEL 1 (FACIL)</option>
                 <option value="2">NIVEL 2 (MEDIO)</option>
