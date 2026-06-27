@@ -236,11 +236,13 @@
         }
         @media (max-width: 768px) { #mobile-controls { display: flex; } }
 
-        /* Aumentando z-index para garantir visibilidade */
+        /* Correção de Camadas (z-index) */
         .modal { z-index: 9999; }
         #dev-panel { z-index: 9000; }
+        #ui-layer { z-index: 8000; }
+        #dialogue-bar { z-index: 8500; }
         #game-world { z-index: 1; }
-        .screen { z-index: 100; }
+        .screen { z-index: 9999; background: #0a0a14; }
         .modal.active { display: flex; }
         .modal-box {
             background: #111; border: 3px solid #333; padding: 24px;
