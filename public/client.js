@@ -8,7 +8,7 @@ let globalBackground = null;
 let availableSkins = {}, availableScenery = {};
 let currentZoneId = 'main';
 let inventory = [];
-let devMode = false, devTool = 'pointer';
+window.devMode = false; window.devTool = 'pointer';
 
 function clearWorld() {
     const worldEl = document.getElementById('game-world');
@@ -686,9 +686,26 @@ chatInput.addEventListener('keydown', async (e) => {
     }
 });
 
-// Mobile Inv Button
-const btnInv = document.getElementById('btn-inv');
-if (btnInv) btnInv.onclick = openInventory;
+async function createItem() {
+    const itemId = document.getElementById('item-id').value.trim();
+    if (!itemId) return toast('ID do item é obrigatório', 'error');
+    
+    // Supondo que você queira dar para si mesmo ou criar um item global
+    try {
+        const res = await fetch('/api/inventory/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ username: myName, itemId, qty: 1 })
+        });
+        const data = await res.json();
+        if (data.success) {
+            toast('Item criado!', 'success');
+            closeModal('modal-item-creator');
+        } else {
+            toast('Erro ao criar', 'error');
+        }
+    } catch(e) { toast('Erro de rede', 'error'); }
+}
 
 // Admin Commands via Chat
 socket.on('admin_cmd', (cmd) => {
@@ -1459,7 +1476,27 @@ socket.on('wall_deleted', (id) => { walls = walls.filter(b => b.id !== id); cons
 socket.on('wall_updated', (b) => { const el = document.querySelector(`.wall[data-id="${b.id}"]`); if (el) { el.style.left=b.x+'px'; el.style.top=b.y+'px'; el.style.width=b.w+'px'; el.style.height=b.h+'px'; } });
 socket.on('new_npc', (n) => drawNpc(n));
 socket.on('npc_deleted', (id) => { if (npcs[id]) { npcs[id].remove(); delete npcs[id]; } });
-socket.on('npc_updated', (n) => { if (npcs[n.id]) { npcs[n.id].x = n.x; npcs[n.id].y = n.y; npcs[n.id].data = n; npcs[n.id].updatePos(); npcs[n.id].nameTag.innerText = n.name; const newVis = createVisualBody(n.skin, n.color, n.dir); npcs[n.id].container.replaceChild(newVis, npcs[n.id].visual); npcs[n.id].visual = newVis; } });
+socket.on('npc_updated', (n) => {
+    if (npcs[n.id]) {
+        const npc = npcs[n.id];
+        // Atualiza apenas os campos que vieram no objeto n
+        if (typeof n.x === 'number') npc.x = n.x;
+        if (typeof n.y === 'number') npc.y = n.y;
+        
+        // Mescla os dados novos no objeto de dados existente
+        npc.data = { ...npc.data, ...n };
+        
+        npc.updatePos();
+        npc.nameTag.innerText = npc.data.name;
+        
+        // Atualiza visual se skin ou direção mudaram
+        if (n.skin || n.dir) {
+            const newVis = createVisualBody(npc.data.skin, npc.data.color, npc.data.dir);
+            npc.container.replaceChild(newVis, npc.visual);
+            npc.visual = newVis;
+        }
+    }
+});
 socket.on('npc_pos_updated', (n) => { if (npcs[n.id]) { npcs[n.id].x = n.x; npcs[n.id].y = n.y; npcs[n.id].updatePos(); } });
 socket.on('new_scenery', (s) => { drawScenery(s); db_cache_npcs_sceneries.sceneries.push(s); });
 socket.on('scenery_deleted', (id) => { const el = document.querySelector(`.scenery-container[data-id="${id}"]`); if (el) el.remove(); db_cache_npcs_sceneries.sceneries = db_cache_npcs_sceneries.sceneries.filter(s => s.id !== id); });
