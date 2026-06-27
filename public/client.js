@@ -8,6 +8,7 @@ let globalBackground = null;
 let availableSkins = {}, availableScenery = {};
 let currentZoneId = 'main';
 let inventory = [];
+let devMode = false, devTool = 'pointer';
 
 function clearWorld() {
     const worldEl = document.getElementById('game-world');
@@ -666,6 +667,7 @@ async function openInventory() {
 
 // Tecla 'i' para abrir inventário
 document.addEventListener('keydown', (e) => {
+    if (!e.key) return; // Segurança adicionada
     if (e.key.toLowerCase() === 'i' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'SELECT') {
         openInventory();
     }
