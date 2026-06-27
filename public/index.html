@@ -696,14 +696,22 @@
     <div id="mobile-controls">
         <div class="dpad">
             <div></div><button id="btn-up">^</button><div></div>
-            <button id="btn-left"><</button><div></div><button id="btn-right">></button>
+            <button id="btn-left"><</button>
+            <button id="btn-inv" style="background:#444; color:#fff; font-size:10px;">I</button>
+            <button id="btn-right">></button>
             <div></div><button id="btn-down">v</button><div></div>
         </div>
         <button class="action-btn" id="btn-action">ACAO</button>
     </div>
 
-    <!-- Modals -->
-    <div id="modal-npc" class="modal">
+    <!-- Inventory Modal -->
+    <div id="modal-inventory" class="modal">
+        <div class="modal-box" style="min-width: 300px;">
+            <h3>INVENTARIO</h3>
+            <div id="inventory-list" style="margin: 10px 0; text-align: left; font-size: 8px; font-family: 'Press Start 2P', monospace;"></div>
+            <button class="pixel-btn btn-secondary" onclick="closeModal('modal-inventory')">FECHAR</button>
+        </div>
+    </div>
         <div class="modal-box" style="min-width:380px;">
             <h3>CRIAR NPC</h3>
             <input type="text" class="pixel-input" id="npc-name" placeholder="NOME" maxlength="30">
