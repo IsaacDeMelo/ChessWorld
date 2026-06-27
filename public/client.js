@@ -6,7 +6,34 @@ let myBio = '', myPieceType = 'classic', myMusic = 'classic', myBoardColor = '#8
 let isAdmin = false;
 let globalBackground = null;
 let availableSkins = {}, availableScenery = {};
-let devMode = false, devTool = 'pointer';
+let currentZoneId = 'main';
+let inventory = [];
+
+function clearWorld() {
+    const worldEl = document.getElementById('game-world');
+    // Remove todos os elementos dinâmicos, mantendo apenas o necessário
+    while (worldEl.firstChild) {
+        worldEl.removeChild(worldEl.firstChild);
+    }
+    players = {}; npcs = {}; barriers = []; walls = []; sceneries = [];
+}
+
+// Lógica de transição de zona
+function joinZone(zoneId) {
+    socket.emit('join_zone', zoneId);
+}
+
+socket.on('zone_snapshot', (data) => {
+    currentZoneId = data.zoneId;
+    clearWorld();
+    // Popular o novo estado da zona
+    data.players.forEach(p => {
+        if (p.id === myId) return; // Jogador local é tratado separadamente
+        players[p.id] = new Entity(p, 'player');
+    });
+    // ... lógica para carregar NPCs, Barreiras, etc da zona ...
+    toast(`Bem-vindo à área: ${zoneId}`, 'info');
+});
 
 // --- 8-BIT AUDIO ENGINE ---
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -614,8 +641,63 @@ function drawScenery(s) {
     world.appendChild(container); sceneries.push(container);
 }
 
-// --- Dialogue Bar ---
-let currentDialogueNpc = null, currentDialogueIndex = 0;
+async function openInventory() {
+    try {
+        const res = await fetch(`/api/inventory/${myName}`);
+        const data = await res.json();
+        const list = document.getElementById('inventory-list');
+        list.innerHTML = '';
+        if (!data.inventory || data.inventory.length === 0) {
+            list.innerHTML = 'VAZIO';
+        } else {
+            data.inventory.forEach(item => {
+                const div = document.createElement('div');
+                div.style.padding = '5px 0';
+                div.style.borderBottom = '1px solid #333';
+                div.textContent = `${item.itemId.toUpperCase()} x${item.qty}`;
+                list.appendChild(div);
+            });
+        }
+        showModal('modal-inventory');
+    } catch (e) {
+        toast('Erro ao abrir inventário', 'error');
+    }
+}
+
+// Tecla 'i' para abrir inventário
+document.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'i' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'SELECT') {
+        openInventory();
+    }
+});
+
+// Suporte ao chat para comandos
+const chatInput = document.getElementById('chat-input');
+chatInput.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+        const msg = chatInput.value.trim();
+        if (msg.startsWith('/')) {
+            toast(`Executando: ${msg}`, 'info');
+            chatInput.value = '';
+            e.preventDefault();
+        }
+    }
+});
+
+// Mobile Inv Button
+const btnInv = document.getElementById('btn-inv');
+if (btnInv) btnInv.onclick = openInventory;
+
+// Admin Commands via Chat
+socket.on('admin_cmd', (cmd) => {
+    // Exemplo: /give Isaac Chave 1
+    const parts = cmd.split(' ');
+    if (parts[0] === '/give') {
+        // Implementar lógica de dar item no cliente ou disparar request
+        toast(`Admin command: ${cmd}`, 'info');
+    }
+});
+
 function openDialogueBar(npcEntity) {
     const npc = npcEntity.data; currentDialogueNpc = npcEntity; currentDialogueIndex = 0;
     showDialoguePage(npc, 0); document.getElementById('dialogue-bar').classList.add('active'); SFX.dialogue();
