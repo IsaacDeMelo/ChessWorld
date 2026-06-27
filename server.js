@@ -9,7 +9,7 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = 'mongodb+srv://kingkongdev2005_db_user:yYtXsbfrRLoIWq4O@cluster0.raovnbb.mongodb.net/?appName=Cluster0';
+const MONGO_URI = 'mongodb+srv://kingkongdev2005_db_user:yYtXsbfrRLoIWq4O@cluster0.raovnbb.mongodb.net/chessworld?retryWrites=true&w=majority';
 const DB_NAME = 'chessworld';
 
 const uploadDir = path.join(__dirname, 'public/uploads');
@@ -638,10 +638,36 @@ io.on('connection', (socket) => {
         const skin = player.skin || ''; const color = player.boardColor || '#888';
         const isAdmin = player.username === 'Isaac';
         engine.addPlayer(socket.id, { username, color, skin, pieceType: player.pieceType || 'classic', x: player.x || 100, y: player.y || 100, isAdmin });
-        const [skins, npcs, sceneries, barriers, walls, sceneryTemplates, globalBg, areaBgs, piecePacks] = await Promise.all([
-            db.collection('skins').find().toArray(), db.collection('npcs').find().toArray(), db.collection('scenery_map').find().toArray(), db.collection('barriers').find().toArray(), db.collection('walls').find().toArray(), db.collection('scenery_templates').find().toArray(), db.collection('global_background').findOne({}), db.collection('area_backgrounds').find().toArray(), db.collection('piece_packs').find().toArray()
+       const [npcs, sceneries, barriers, walls] = await Promise.all([
+            db.collection('npcs').find().toArray(), 
+            db.collection('scenery_map').find().toArray(), 
+            db.collection('barriers').find().toArray(), 
+            db.collection('walls').find().toArray()
         ]);
-        socket.emit('login_success', { zoneId: 'main', user: engine.players[socket.id], playerData: { username: player.username, skin: player.skin, bio: player.bio, pieceType: player.pieceType, music: player.music, boardColor: player.boardColor, xp: player.xp, level: player.level, wins: player.wins, losses: player.losses, isAdmin }, players: engine.zones['main'].players, barriers, walls, npcs, sceneries, sceneryTemplates, skins, globalBackground: globalBg, areaBackgrounds: areaBgs, piecePacks });
+        
+        socket.emit('login_success', { 
+            zoneId: 'main', 
+            user: engine.players[socket.id], 
+            playerData: { 
+                username: player.username, 
+                skin: player.skin, 
+                bio: player.bio, 
+                pieceType: player.pieceType, 
+                music: player.music, 
+                boardColor: player.boardColor, 
+                xp: player.xp, 
+                level: player.level, 
+                wins: player.wins, 
+                losses: player.losses, 
+                isAdmin 
+            }, 
+            players: engine.zones['main'].players, 
+            barriers, 
+            walls, 
+            npcs, 
+            sceneries 
+        });
+        
         socket.broadcast.emit('player_joined', { zoneId: 'main', player: engine.players[socket.id] });
     });
 
