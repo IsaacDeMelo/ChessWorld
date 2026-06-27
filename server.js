@@ -35,11 +35,22 @@ const DEFAULT_PIECE_TYPE = 'classic';
 const DEFAULT_MUSIC = 'classic';
 
 async function connectDB() {
-    const client = new MongoClient(MONGO_URI);
+    const client = new MongoClient(MONGO_URI, {
+        serverSelectionTimeoutMS: 10000,
+        family: 4
+    });
+
     await client.connect();
+
     db = client.db(DB_NAME);
+
     console.log('MongoDB conectado:', DB_NAME);
-    await db.collection('players').createIndex({ username: 1 }, { unique: true });
+
+    await db.collection('players').createIndex({
+        username: 1
+    }, {
+        unique: true
+    });
 }
 
 app.get('/api/data', async (_, res) => {
@@ -119,6 +130,19 @@ app.post('/api/background/area/update', async (req, res) => {
     io.emit('area_background_updated', { id, ...update }); res.json({ success: true });
 });
 
+// === Sistema de Inventário ===
+app.post('/api/inventory/add', async (req, res) => {
+    const { username, itemId, qty } = req.body;
+    if (!username || !itemId) return res.json({ success: false, error: 'Dados invalidos' });
+    await db.collection('players').updateOne({ username }, { $push: { inventory: { itemId, qty: qty || 1, addedAt: new Date() } } });
+    res.json({ success: true });
+});
+
+app.get('/api/inventory/:username', async (req, res) => {
+    const player = await db.collection('players').findOne({ username: req.params.username });
+    res.json({ inventory: player?.inventory || [] });
+});
+
 // === Rota antiga e Nova do Tileset de Peças ===
 app.get('/api/piece-packs', async (_, res) => { const packs = await db.collection('piece_packs').find().toArray(); res.json({ packs }); });
 
@@ -188,7 +212,53 @@ app.post('/api/login', async (req, res) => {
     res.json({ success: true, player: { username: player.username, skin: player.skin, bio: player.bio, pieceType: player.pieceType, music: player.music, boardColor: player.boardColor, x: player.x, y: player.y, xp: player.xp, level: player.level, wins: player.wins, losses: player.losses }});
 });
 
-// --- Chess Engine (COM CRAZY MODE) ---
+// --- IA de NPCs (Aggro) ---
+function runNpcAI() {
+    setInterval(() => {
+        for (const zoneId in engine.zones) {
+            const zone = engine.zones[zoneId];
+            zone.npcs.forEach(npc => {
+                if (!npc.isAggro) return;
+
+                const players = Object.values(zone.players);
+                let closest = null;
+                let minDist = npc.aggroRadius || 200; 
+
+                players.forEach(p => {
+                    const dist = Math.hypot(p.x - npc.x, p.y - npc.y);
+                    if (dist < minDist) { minDist = dist; closest = p; }
+                });
+
+                if (closest) {
+                    // Algoritmo de perseguição (vetor de direção)
+                    const dx = closest.x - npc.x;
+                    const dy = closest.y - npc.y;
+                    const dist = Math.hypot(dx, dy);
+                    
+                    if (dist > 30) { // Se não colidiu ainda
+                        const speed = 2;
+                        npc.x += (dx / dist) * speed;
+                        npc.y += (dy / dist) * speed;
+                        
+                        // Atualiza direção para animação
+                        npc.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+                        
+                        // Sincroniza posição para os clientes
+                        for (const pid in zone.players) {
+                            io.to(pid).emit('npc_moved', { id: npc.id, x: npc.x, y: npc.y, dir: npc.dir });
+                        }
+                    } else {
+                        // Se colidiu ou chegou muito perto, inicia duelo (simulado)
+                        // Poderia disparar evento de 'challenge_npc' aqui
+                    }
+                }
+            });
+        }
+    }, 100);
+}
+
+// Inicia a IA
+runNpcAI();
 const PIECE_VAL = { p: 10, n: 30, b: 30, r: 50, q: 90, k: 900 };
 
 class ChessGame {
@@ -496,9 +566,44 @@ class ChessGame {
 }
 
 class GameEngine {
-    constructor() { this.players = {}; this.battles = {}; this.challenges = {}; this.bCounter = 0; }
-    addPlayer(id, data) { this.players[id] = { id, ...data, inBattle: false, battleId: null, dir: 'down', isMoving: false }; }
-    removePlayer(id) { if (this.players[id] && this.players[id].battleId) this.endBattle(this.players[id].battleId, id); delete this.players[id]; }
+    constructor() {
+        this.zones = { 'main': { players: {}, npcs: [], sceneries: [], barriers: [], walls: [], areaBgs: [] } };
+        this.players = {}; 
+        this.battles = {}; this.challenges = {}; this.bCounter = 0;
+    }
+
+    joinZone(socketId, zoneId) {
+        const player = this.players[socketId];
+        if (!player) return;
+        
+        // Remove da zona antiga
+        if (player.zoneId && this.zones[player.zoneId]) {
+            delete this.zones[player.zoneId].players[socketId];
+        }
+        
+        // Adiciona na nova
+        player.zoneId = zoneId;
+        if (!this.zones[zoneId]) {
+            this.zones[zoneId] = { players: {}, npcs: [], sceneries: [], barriers: [], walls: [], areaBgs: [] };
+        }
+        this.zones[zoneId].players[socketId] = player;
+    }
+
+    addPlayer(id, data, zoneId = 'main') {
+        this.players[id] = { id, ...data, inBattle: false, battleId: null, dir: 'down', isMoving: false, zoneId };
+        this.joinZone(id, zoneId);
+    }
+
+    removePlayer(id) {
+        const player = this.players[id];
+        if (player) {
+            if (player.battleId) this.endBattle(player.battleId, id);
+            if (player.zoneId && this.zones[player.zoneId]) {
+                delete this.zones[player.zoneId].players[id];
+            }
+            delete this.players[id];
+        }
+    }
     acceptChallenge(fromId, toId, isBot = false, botLevel = 1) {
         if (!this.players[fromId] || this.players[fromId].inBattle) return null;
         if (!isBot && (!this.players[toId] || this.players[toId].inBattle)) return null;
@@ -536,17 +641,23 @@ io.on('connection', (socket) => {
         const [skins, npcs, sceneries, barriers, walls, sceneryTemplates, globalBg, areaBgs, piecePacks] = await Promise.all([
             db.collection('skins').find().toArray(), db.collection('npcs').find().toArray(), db.collection('scenery_map').find().toArray(), db.collection('barriers').find().toArray(), db.collection('walls').find().toArray(), db.collection('scenery_templates').find().toArray(), db.collection('global_background').findOne({}), db.collection('area_backgrounds').find().toArray(), db.collection('piece_packs').find().toArray()
         ]);
-        socket.emit('login_success', { user: engine.players[socket.id], playerData: { username: player.username, skin: player.skin, bio: player.bio, pieceType: player.pieceType, music: player.music, boardColor: player.boardColor, xp: player.xp, level: player.level, wins: player.wins, losses: player.losses, isAdmin }, players: engine.players, barriers, walls, npcs, sceneries, sceneryTemplates, skins, globalBackground: globalBg, areaBackgrounds: areaBgs, piecePacks });
-        socket.broadcast.emit('player_joined', engine.players[socket.id]);
+        socket.emit('login_success', { zoneId: 'main', user: engine.players[socket.id], playerData: { username: player.username, skin: player.skin, bio: player.bio, pieceType: player.pieceType, music: player.music, boardColor: player.boardColor, xp: player.xp, level: player.level, wins: player.wins, losses: player.losses, isAdmin }, players: engine.zones['main'].players, barriers, walls, npcs, sceneries, sceneryTemplates, skins, globalBackground: globalBg, areaBackgrounds: areaBgs, piecePacks });
+        socket.broadcast.emit('player_joined', { zoneId: 'main', player: engine.players[socket.id] });
     });
 
-    socket.on('move', (d) => {
-        if (!d) return; const p = engine.players[socket.id]; if (!p || p.inBattle) return;
-        if (typeof d.x !== 'number' || typeof d.y !== 'number') return;
-        if (!['up', 'down', 'left', 'right'].includes(d.dir)) return;
-        p.x = d.x; p.y = d.y; p.dir = d.dir; p.isMoving = !!d.isMoving;
-        io.emit('player_moved', { id: socket.id, x: d.x, y: d.y, dir: d.dir, isMoving: d.isMoving });
+    socket.on('join_zone', (zoneId) => {
+        engine.joinZone(socket.id, zoneId);
+        const zoneData = engine.zones[zoneId];
+        socket.emit('zone_snapshot', {
+            zoneId,
+            players: Object.values(zoneData.players),
+            npcs: zoneData.npcs,
+            sceneries: zoneData.sceneries,
+            barriers: zoneData.barriers,
+            walls: zoneData.walls
+        });
     });
+
 
     socket.on('chat_msg', (msg) => {
         if (typeof msg !== 'string') return; msg = msg.trim().substring(0, 200); if (!msg) return;
