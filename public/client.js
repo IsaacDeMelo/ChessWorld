@@ -16,7 +16,7 @@ function clearWorld() {
     while (worldEl.firstChild) {
         worldEl.removeChild(worldEl.firstChild);
     }
-    players = {}; npcs = {}; barriers = []; walls = []; sceneries = [];
+    players = {}; npcs = {}; barriers = []; walls = []; sceneries = []; areaBackgrounds = [];
 }
 
 // Lógica de transição de zona
@@ -25,15 +25,8 @@ function joinZone(zoneId) {
 }
 
 socket.on('zone_snapshot', (data) => {
-    currentZoneId = data.zoneId;
-    clearWorld();
-    // Popular o novo estado da zona
-    data.players.forEach(p => {
-        if (p.id === myId) return; // Jogador local é tratado separadamente
-        players[p.id] = new Entity(p, 'player');
-    });
-    // ... lógica para carregar NPCs, Barreiras, etc da zona ...
-    toast(`Bem-vindo à área: ${zoneId}`, 'info');
+    loadWorldSnapshot(data);
+    toast(`Bem-vindo a ${data.map.name}`, 'info');
 });
 
 // --- 8-BIT AUDIO ENGINE ---
@@ -801,7 +794,8 @@ document.getElementById('btn-action').addEventListener('touchstart', (e) => {
 const keys = {};
 let camX = 0, camY = 0;
 document.onkeydown = (e) => { if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'SELECT') keys[e.key.toLowerCase()] = true; };
-document.onkeyup = (e) => { if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'SELECT') keys[e.key.toLowerCase()] = false; };
+document.onkeyup = (e) => { keys[e.key.toLowerCase()] = false; };
+window.addEventListener('blur', () => { for (const key in keys) keys[key] = false; });
 const bindTouch = (id, key) => {
     const btn = document.getElementById(id);
     if(!btn) return;
@@ -819,7 +813,7 @@ function gameLoop() {
         players[id].animateSprite();
     }
     for (const id in npcs) npcs[id].animateSprite();
-    if (!myId || !players[myId] || players[myId].badge?.style.display === 'block') return;
+    if (!myId || !players[myId] || arena.ending || mapTransitioning || document.getElementById('map-editor')?.classList.contains('active') || players[myId].badge?.style.display === 'block') return;
     
     const p = players[myId];
     let dx = 0, dy = 0;
@@ -831,7 +825,7 @@ function gameLoop() {
     const moving = (dx !== 0 || dy !== 0);
     if (!moving) p.setDir(p.dir, false);
     if (moving) {
-        let nx = p.x + dx, ny = p.y + dy;
+        let nx = Math.max(0,Math.min(p.x + dx,currentMap.width - 48)), ny = Math.max(0,Math.min(p.y + dy,currentMap.height - 48));
         if (checkCol(nx, p.y)) nx = p.x;
         if (checkCol(p.x, ny)) ny = p.y;
         p.x = nx; p.y = ny; p.updatePos();
@@ -845,6 +839,7 @@ function gameLoop() {
     const tY = -p.y + window.innerHeight / 2 - 24;
     camX += (tX - camX) * 0.12; camY += (tY - camY) * 0.12;
     world.style.transform = `translate(${Math.round(camX)}px, ${Math.round(camY)}px)`;
+    checkPortalEntry(p);
 }
 requestAnimationFrame(gameLoop);
 
@@ -944,6 +939,9 @@ class ChessArena {
         return this.pieces[type] || '';
     }
     start(data) {
+        if (this.ending) return;
+        this.opponent = data.opp;
+        this.screen.classList.remove('ending');
         this.mySide = data.mySide; this.lastAnimatedMove = -1;
         this.applyTheme(data.opp.pieceType);
         document.getElementById('opp-name').innerText = data.opp.name;
@@ -1133,6 +1131,7 @@ class ChessArena {
     }
     clearPowerTargets(){this.boardEl.querySelectorAll('.cell').forEach(c=>c.classList.remove('power-target'));}
     updateBoard(state) {
+        if (this.ending || !this.screen.classList.contains('active')) return;
         const isNewMove = state.lastAction && state.lastAction.moveCount > this.lastAnimatedMove;
         this.state = state; this.boardEl.innerHTML = '';
         const flip = this.mySide === 'b';
@@ -1194,6 +1193,7 @@ class ChessArena {
         }
     }
     onClick(r,c,piece) {
+        if (this.ending || !this.state || this.state.status !== 'active') return;
         if(this.state.turn!==this.mySide)return;
 
         if(this.selected){
@@ -1216,10 +1216,102 @@ class ChessArena {
             this.selected={r,c}; this.showValidMoves(r,c); SFX.select();
         }
     }
-    close(){this.screen.classList.remove('active');this.state=null;this.selected=null; this.clearValidMoves(); stopBGM();}
+    async finish(result) {
+        if (this.ending || !this.state) return;
+        this.ending = true;
+        this.selected = null;
+        this.clearValidMoves();
+        stopBGM();
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const pause = ms => new Promise(resolve => setTimeout(resolve, reduced ? Math.min(ms, 150) : ms));
+        const scene = document.createElement('div');
+        scene.className = 'battle-farewell';
+        scene.setAttribute('role', 'status');
+        const title = document.createElement('div');
+        title.className = 'farewell-title';
+        title.textContent = {checkmate:'XEQUE-MATE',forfeit:'PARTIDA ENCERRADA POR DESISTÊNCIA',disconnect:'OPONENTE DESCONECTOU',stalemate:'EMPATE'}[result.reason] || 'FIM DE PARTIDA';
+        scene.appendChild(title);
+        const actors = [
+            { box: this.botSprite, skin: mySkin, color: myColor, dir: 'right', side: -1 },
+            { box: this.topSprite, skin: this.opponent.skin, color: this.opponent.color, dir: 'left', side: 1 }
+        ].map(data => {
+            const rect = data.box.getBoundingClientRect();
+            const actor = document.createElement('div');
+            actor.className = 'farewell-actor';
+            actor.appendChild(createVisualBody(data.skin, data.color, data.dir));
+            actor.style.left = rect.left + 'px';
+            actor.style.top = rect.top + 'px';
+            scene.appendChild(actor);
+            return {...data, actor, rect};
+        });
+        this.screen.appendChild(scene);
+        this.screen.classList.add('ending');
+        try {
+            await pause(650);
+            await Promise.all(actors.map(async ({actor,rect,side}) => {
+                const dx = window.innerWidth / 2 + side * 36 - 24 - rect.left;
+                const dy = window.innerHeight / 2 - 24 - rect.top;
+                const walk = setInterval(() => {
+                    const sprite = actor.firstChild;
+                    if (sprite.classList.contains('sprite-sheet')) {
+                        const frame = (Number(sprite.dataset.frame || 0) + 1) % 4;
+                        sprite.dataset.frame = frame;
+                        sprite.style.backgroundPositionX = `-${frame * 48}px`;
+                    }
+                }, 130);
+                try {
+                    await actor.animate([
+                        {transform:'translate(0,0)'},
+                        {transform:`translate(${dx}px,${dy}px)`}
+                    ], {duration: reduced ? 1 : 1250, fill:'forwards', easing:'ease-in-out'}).finished;
+                } finally { clearInterval(walk); }
+                actor.firstChild.style.backgroundPositionX = '0px';
+            }));
+            const handshake = document.createElement('div');
+            handshake.className = 'farewell-handshake';
+            handshake.textContent = '🤝';
+            handshake.setAttribute('aria-label','Os jogadores apertam as mãos');
+            scene.appendChild(handshake);
+            actors.forEach(({actor,side}) => {
+                const arm = document.createElement('span');
+                arm.className = 'farewell-arm ' + (side < 0 ? 'arm-right' : 'arm-left');
+                actor.appendChild(arm);
+            });
+            title.textContent = result.stalemate ? 'EMPATE · BOA PARTIDA!' : `${result.winnerName} VENCEU!`;
+            scene.classList.add('shaking-hands');
+            await pause(1400);
+            this.screen.classList.add('farewell-exit');
+            await pause(450);
+        } finally {
+            scene.remove();
+            this.close();
+            this.ending = false;
+            showBattleResult(result);
+        }
+    }
+    close(){this.screen.classList.remove('active','ending','farewell-exit');this.state=null;this.selected=null; this.clearValidMoves(); stopBGM();}
 }
 
 const arena = new ChessArena();
+
+function showBattleResult(result) {
+    document.getElementById('world-battle-result')?.remove();
+    const banner = document.createElement('div');
+    banner.id = 'world-battle-result';
+    banner.setAttribute('role','status');
+    banner.textContent = result.stalemate ? 'PARTIDA EMPATADA' : `🏆 ${result.winnerName} venceu!`;
+    document.body.appendChild(banner);
+    const winner = players[result.winnerId] || npcs[result.winnerId];
+    let badge;
+    if (winner) {
+        winner.container.querySelector('.victory-badge')?.remove();
+        badge = document.createElement('div');
+        badge.className = 'victory-badge';
+        badge.textContent = '🏆 VENCEDOR';
+        winner.container.appendChild(badge);
+    }
+    setTimeout(() => { banner.remove(); badge?.remove(); }, 10000);
+}
 
 // ==========================================
 // DEV MODE & TOOLS
@@ -1444,9 +1536,7 @@ socket.on('login_success', (data) => {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById('ui-layer').style.display = 'flex'; world.style.display = 'block';
     document.getElementById('my-name').innerText = data.user.username;
     camX = -data.user.x + window.innerWidth / 2 - 24; camY = -data.user.y + window.innerHeight / 2 - 24;
-    (data.barriers || []).forEach(b => { drawBarrier(b); barriers.push(b); }); (data.walls || []).forEach(w => { drawWall(w); walls.push(w); }); (data.sceneries || []).forEach(s => drawScenery(s));
-    db_cache_npcs_sceneries.sceneries = data.sceneries || []; (data.npcs || []).forEach(n => drawNpc(n));
-    for (const id in data.players) players[id] = new Entity(data.players[id], 'player');
+    loadWorldSnapshot(data);
     toast(`Bem-vindo, ${data.user.username}!`, 'success');
 });
 function applyGlobalBackground(bg) { if (!bg || !bg.url) return; world.style.backgroundImage = `url(${bg.url})`; world.style.backgroundSize = `${bg.tileSize || 256}px ${bg.tileSize || 256}px`; world.style.backgroundRepeat = 'repeat'; }
@@ -1509,4 +1599,7 @@ socket.on('player_in_battle', (data) => { if (players[data.p1Id] && players[data
 socket.on('player_left_battle', (data) => { if (players[data.p1Id] && players[data.p1Id].badge) players[data.p1Id].badge.style.display = 'none'; if (players[data.p2Id] && players[data.p2Id].badge) players[data.p2Id].badge.style.display = 'none'; });
 socket.on('battle_start', (data) => { arena.start(data); });
 socket.on('chess_update', (state) => { arena.updateBoard(state); });
-socket.on('battle_end', (data) => { arena.close(); });
+socket.on('battle_end', (data) => { arena.finish(data); });
+socket.on('battle_result', (data) => {
+    if (arena.state?.id !== data.battleId) showBattleResult(data);
+});

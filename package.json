@@ -4,6 +4,8 @@
   "description": "ChessWorld - Mundo virtual multiplayer com xadrez",
   "main": "server.js",
   "scripts": {
+    "test": "node --test",
+    "local": "node scripts/local.cjs",
     "start": "node server.js",
     "dev": "node --watch server.js"
   },

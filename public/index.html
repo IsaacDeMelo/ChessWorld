@@ -309,10 +309,28 @@
         /* BATTLE SCREEN & CRAZY MODE CSS */
         #battle-screen {
             display: none; position: fixed; inset: 0;
-            background: #0a0a14; z-index: 60;
+            background: #0a0a14; z-index: 9100;
             padding: 12px; overflow: hidden;
         }
         #battle-screen.active { display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
+        #battle-screen { transition: opacity .45s ease; }
+        #board-wrapper { transition: opacity .65s ease, transform .65s ease, filter .65s ease; }
+        #battle-screen.ending #board-wrapper { opacity: 0; transform: scale(.65); filter: blur(12px); pointer-events: none; }
+        #battle-screen.ending > .arena-row { visibility: hidden; }
+        #battle-screen.ending .battle-controls { visibility: hidden; pointer-events: none; }
+        #battle-screen.farewell-exit { opacity: 0; }
+        .battle-farewell { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+        .farewell-title { position: absolute; top: 20%; left: 5%; width: 90%; text-align: center; color: #ffe69a; font-family: 'Press Start 2P', monospace; font-size: clamp(10px, 2.5vw, 18px); line-height: 1.8; }
+        .farewell-actor { position: absolute; width: 48px; height: 48px; image-rendering: pixelated; }
+        .farewell-handshake { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -10%); font-size: 30px; z-index: 2; animation: handshake .3s ease-in-out infinite alternate; }
+        .farewell-arm { position: absolute; top: 27px; width: 20px; height: 9px; background: #e8b78c; border: 2px solid #49372b; animation: handshake-arm .3s ease-in-out infinite alternate; }
+        .arm-right { right: -15px; transform-origin: left center; }
+        .arm-left { left: -15px; transform-origin: right center; }
+        @keyframes handshake { to { transform: translate(-50%, 3px); } }
+        @keyframes handshake-arm { to { top: 32px; } }
+        #world-battle-result { position: fixed; z-index: 9100; top: 24px; left: 50%; transform: translateX(-50%); max-width: 90vw; padding: 18px 24px; background: #191c2f; color: #ffe69a; border: 2px solid #e2b85b; box-shadow: 0 6px 25px #0008; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 12px; line-height: 1.8; pointer-events: none; }
+        .victory-badge { position: absolute; bottom: calc(100% + 24px); left: 50%; transform: translateX(-50%); white-space: nowrap; padding: 5px 8px; background: #262037; border: 1px solid #e2b85b; color: #ffe69a; font-size: 10px; pointer-events: none; }
+        @media (prefers-reduced-motion: reduce) { #board-wrapper, #battle-screen { transition-duration: .1s; } .farewell-handshake, .farewell-arm { animation: none; } }
         .arena-row { display: flex; align-items: center; gap: 12px; width: 100%; justify-content: center; }
         .arena-combatant { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
         .arena-sprite-box { width: 56px; height: 56px; image-rendering: pixelated; }
@@ -377,7 +395,7 @@
         @keyframes flyOffAnim { 0% { transform: translate(0,0) scale(1) rotate(0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)) scale(0.3) rotate(var(--rot)); opacity: 0; } }
         @keyframes shakeBoard { 0% { transform: translate(6px,6px); } 25% { transform: translate(-6px,-6px); } 50% { transform: translate(6px,-6px); } 75% { transform: translate(-6px,6px); } 100% { transform: translate(0,0); } }
         .anim-shake { animation: shakeBoard 0.25s steps(4) none; }
-        #flash-screen { position: fixed; inset: 0; background: #fff; z-index: 100; opacity: 0; pointer-events: none; }
+        #flash-screen { position: fixed; inset: 0; background: #fff; z-index: 9200; opacity: 0; pointer-events: none; }
         .anim-flash { animation: flashAnim 0.15s steps(3) none; }
         @keyframes flashAnim { 0% { opacity: 0.5; } 50% { opacity: 0.2; } 100% { opacity: 0; } }
 
@@ -421,6 +439,7 @@
         .text-xs { font-size: 7px; }
         .text-muted { color: #666; }
     </style>
+    <link rel="stylesheet" href="/maps.css">
 </head>
 <body>
     <div id="flash-screen"></div>
@@ -626,6 +645,7 @@
     <!-- UI Layer -->
     <div id="ui-layer">
         <div><span id="my-name"></span></div>
+        <div id="current-map-name"></div>
         <input type="text" class="pixel-input" id="chat-input" placeholder="ENTER PARA FALAR..." maxlength="200">
         <div style="display:flex;gap:4px;">
             <button class="pixel-btn btn-secondary btn-sm" id="btn-bgm-toggle">SOM:ON</button>
@@ -636,6 +656,13 @@
     <!-- Dev Panel -->
     <div id="dev-panel">
         <h3>PAINEL DEV</h3>
+        <div class="dev-section">
+            <div class="dev-section-title">MAPAS E PORTAIS</div>
+            <button class="dev-tool-btn" id="btn-edit-maps">CONFIGURAR MAPAS</button>
+            <button class="dev-tool-btn" id="btn-create-portal">CRIAR PORTAL DE IDA E VOLTA</button>
+            <p class="map-editor-hint">Escolha PORTAL e clique no chão para posicionar.</p>
+            <div id="dev-portal-list"></div>
+        </div>
         <div class="dev-section">
             <div class="dev-section-title">FERRAMENTA</div>
             <div class="dev-tool-grid">
@@ -666,11 +693,11 @@
         </div>
 
         <div id="dev-background-tools" class="dev-sub-panel" style="display:none;">
-            <div class="dev-section-title">BACKGROUND GLOBAL</div>
+            <div class="dev-section-title">FUNDO DESTE MAPA</div>
             <input type="file" class="pixel-input" id="dev-bg-global-file" accept="image/png, image/jpg, image/gif" style="padding:6px;font-size:8px;">
-            <button class="pixel-btn btn-primary btn-sm" id="btn-dev-upload-bg-global">DEFINIR GLOBAL</button>
+            <button class="pixel-btn btn-primary btn-sm" id="btn-dev-upload-bg-global">DEFINIR FUNDO REPETIDO</button>
             <div class="flex-row mt-2">
-                <span class="dev-prop-label">TILE</span><input type="number" class="pixel-input" id="dev-bg-tile" value="256" min="32" max="1024">
+                <span class="dev-prop-label">TILE</span><input type="number" class="pixel-input" id="dev-bg-tile" value="256" min="8" max="4096">
             </div>
             <hr style="border:0;border-top:1px solid #222;margin:6px 0;">
             <div class="dev-section-title">BACKGROUND DE AREA (arraste para criar)</div>
@@ -860,5 +887,6 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/client.js"></script>
+    <script src="/maps.js"></script>
 </body>
 </html>

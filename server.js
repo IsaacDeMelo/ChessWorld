@@ -7,10 +7,11 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
+const { WorldMaps, room: mapRoom, clamp: clampToMap, overlaps } = require('./world-maps');
 
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = 'mongodb+srv://kingkongdev2005_db_user:yYtXsbfrRLoIWq4O@cluster0.raovnbb.mongodb.net/chessworld?retryWrites=true&w=majority';
-const DB_NAME = 'chessworld';
+const DB_NAME = process.env.DB_NAME || 'chessworld';
 
 const uploadDir = path.join(__dirname, 'public/uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -23,11 +24,12 @@ const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // JSON limit setado para suportar upload do Tileset Base64 gigante
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/favicon.ico', (_, res) => res.status(204).end());
 
 let db;
+let worldMaps;
 let crazyModeEnabled = false;
 
 const DEFAULT_BOARD_COLOR = '#8b6d4a';
@@ -35,7 +37,7 @@ const DEFAULT_PIECE_TYPE = 'classic';
 const DEFAULT_MUSIC = 'classic';
 
 async function connectDB() {
-    const client = new MongoClient(MONGO_URI, {
+    const client = new MongoClient(process.env.MONGO_URI || MONGO_URI, {
         serverSelectionTimeoutMS: 10000,
         family: 4
     });
@@ -51,14 +53,20 @@ async function connectDB() {
     }, {
         unique: true
     });
+    worldMaps = new WorldMaps(db, io, engine);
+    await worldMaps.initialize();
 }
 
-app.get('/api/data', async (_, res) => {
+app.get('/api/maps', async (_, res) => {
+    res.json({ maps: await db.collection('maps').find().project({_id:0}).toArray() });
+});
+
+app.get('/api/data', async (req, res) => {
     const [skins, sceneryTemplates, globalBg, areaBgs, piecePacks] = await Promise.all([
         db.collection('skins').find().toArray(),
         db.collection('scenery_templates').find().toArray(),
-        db.collection('global_background').findOne({}),
-        db.collection('area_backgrounds').find().toArray(),
+        db.collection('global_background').findOne({mapId:req.query.mapId||'main'}),
+        db.collection('area_backgrounds').find({mapId:req.query.mapId||'main'}).toArray(),
         db.collection('piece_packs').find().toArray()
     ]);
     res.json({ skins, scenery: sceneryTemplates, globalBackground: globalBg, areaBackgrounds: areaBgs, piecePacks });
@@ -71,7 +79,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
     const item = { name, url: `/uploads/${req.file.filename}` };
     try {
         if (type === 'skin') await db.collection('skins').insertOne(item);
-        else await db.collection('scenery_templates').insertOne(item);
+        else if (type !== 'map_background') await db.collection('scenery_templates').insertOne(item);
         res.json({ success: true, item, type });
     } catch (e) { res.json({ success: false, error: 'Erro ao salvar no banco: ' + e.message }); }
 });
@@ -96,17 +104,18 @@ app.post('/api/skin/delete', async (req, res) => {
     res.json({ success: true });
 });
 
-app.get('/api/backgrounds', async (_, res) => {
-    const [globalBg, areaBgs] = await Promise.all([ db.collection('global_background').findOne({}), db.collection('area_backgrounds').find().toArray() ]);
+app.get('/api/backgrounds', async (req, res) => {
+    const [globalBg, areaBgs] = await Promise.all([ worldMaps.scopedDatabase(req.body?.mapId || req.query.mapId || 'main').collection('global_background').findOne({}), worldMaps.scopedDatabase(req.body?.mapId || req.query.mapId || 'main').collection('area_backgrounds').find().toArray() ]);
     res.json({ global: globalBg, areas: areaBgs });
 });
 
 app.post('/api/background/global', async (req, res) => {
     const { url, tileSize } = req.body;
     if (!url) return res.json({ success: false, error: 'URL obrigatoria' });
-    await db.collection('global_background').deleteMany({});
-    await db.collection('global_background').insertOne({ url, tileSize: tileSize || 256, updatedAt: new Date() });
-    io.emit('global_background_update', { url, tileSize: tileSize || 256 });
+    await worldMaps.scopedDatabase(req.body?.mapId || req.query.mapId || 'main').collection('global_background').deleteMany({});
+    await worldMaps.scopedDatabase(req.body?.mapId || req.query.mapId || 'main').collection('global_background').insertOne({ url, tileSize: tileSize || 256, updatedAt: new Date() });
+    await worldMaps.setBackground(req.body?.mapId || req.query.mapId || 'main', {url,tileSize:tileSize||256,mode:'repeat'});
+    io.to(mapRoom(req.body?.mapId || req.query.mapId || 'main')).emit('global_background_update', { url, tileSize: tileSize || 256 });
     res.json({ success: true });
 });
 
@@ -114,20 +123,20 @@ app.post('/api/background/area', async (req, res) => {
     const { x, y, w, h, url, z } = req.body;
     if (!url || typeof x !== 'number' || typeof y !== 'number' || typeof w !== 'number' || typeof h !== 'number') return res.json({ success: false, error: 'Dados invalidos' });
     const area = { id: 'bg_' + Date.now(), x, y, w, h, url, z: z || 0, createdAt: new Date() };
-    await db.collection('area_backgrounds').insertOne(area); io.emit('area_background_added', area); res.json({ success: true, area });
+    await worldMaps.scopedDatabase(req.body?.mapId || req.query.mapId || 'main').collection('area_backgrounds').insertOne(area); io.to(mapRoom(req.body?.mapId || req.query.mapId || 'main')).emit('area_background_added', area); res.json({ success: true, area });
 });
 
 app.post('/api/background/area/delete', async (req, res) => {
     const { id } = req.body; if (!id) return res.json({ success: false, error: 'ID invalido' });
-    await db.collection('area_backgrounds').deleteOne({ id }); io.emit('area_background_deleted', id); res.json({ success: true });
+    await worldMaps.scopedDatabase(req.body?.mapId || req.query.mapId || 'main').collection('area_backgrounds').deleteOne({ id }); io.to(mapRoom(req.body?.mapId || req.query.mapId || 'main')).emit('area_background_deleted', id); res.json({ success: true });
 });
 
 app.post('/api/background/area/update', async (req, res) => {
     const { id, x, y, w, h, url, z } = req.body;
     if (!id) return res.json({ success: false, error: 'ID invalido' });
     const update = {}; if (typeof x === 'number') update.x = x; if (typeof y === 'number') update.y = y; if (typeof w === 'number') update.w = w; if (typeof h === 'number') update.h = h; if (url) update.url = url; if (typeof z === 'number') update.z = z;
-    await db.collection('area_backgrounds').updateOne({ id }, { $set: update });
-    io.emit('area_background_updated', { id, ...update }); res.json({ success: true });
+    await worldMaps.scopedDatabase(req.body?.mapId || req.query.mapId || 'main').collection('area_backgrounds').updateOne({ id }, { $set: update });
+    io.to(mapRoom(req.body?.mapId || req.query.mapId || 'main')).emit('area_background_updated', { id, ...update }); res.json({ success: true });
 });
 
 // === Sistema de Inventário ===
@@ -195,7 +204,8 @@ app.post('/api/register', async (req, res) => {
     if (password.length < 4) return res.json({ success: false, error: 'Senha deve ter pelo menos 4 caracteres' });
     if (await db.collection('players').findOne({ username: cleanUsername })) return res.json({ success: false, error: 'Usuario ja existe' });
     const hashedPassword = await bcrypt.hash(password, 10);
-    const player = { username: cleanUsername, password: hashedPassword, skin: skin?.substring(0, 50) || '', bio: bio?.substring(0, 200) || '', pieceType: pieceType || DEFAULT_PIECE_TYPE, music: music || DEFAULT_MUSIC, boardColor: boardColor || DEFAULT_BOARD_COLOR, x: 100, y: 100, xp: 0, level: 1, wins: 0, losses: 0, createdAt: new Date() };
+    const spawn = (await worldMaps.get('main')).spawn;
+    const player = { username: cleanUsername, password: hashedPassword, skin: skin?.substring(0, 50) || '', bio: bio?.substring(0, 200) || '', pieceType: pieceType || DEFAULT_PIECE_TYPE, music: music || DEFAULT_MUSIC, boardColor: boardColor || DEFAULT_BOARD_COLOR, zoneId: 'main', x: spawn.x, y: spawn.y, xp: 0, level: 1, wins: 0, losses: 0, createdAt: new Date() };
     await db.collection('players').insertOne(player); res.json({ success: true });
 });
 
@@ -431,6 +441,7 @@ class ChessGame {
     }
 
     move(socketId, from, to) {
+        if (![from, to].every(pos => pos && Number.isInteger(pos.r) && Number.isInteger(pos.c) && pos.r >= 0 && pos.r < 8 && pos.c >= 0 && pos.c < 8)) return false;
         if (this.status !== 'active') return false;
         const color = socketId === this.p1Id ? 'w' : (socketId === this.p2Id ? 'b' : null);
         if (color !== this.turn) return false;
@@ -533,7 +544,7 @@ class ChessGame {
         if (cr.b.k) castling += 'k'; if (cr.b.q) castling += 'q';
         fen += castling || '-'; fen += ' ';
         if (this.enPassantTarget) { const files = 'abcdefgh'; fen += files[this.enPassantTarget.c] + (8 - this.enPassantTarget.r); } else { fen += '-'; }
-        fen += ` 0 ${this.moveCount}`; return fen;
+        fen += ` 0 ${Math.floor(this.moveCount / 2) + 1}`; return fen;
     }
     async makeBotMove() {
         if (this.status !== 'active' || this.turn !== 'b') return;
@@ -542,18 +553,23 @@ class ChessGame {
             try {
                 const fen = this.boardToFEN(); let moveUCI = null;
                 try {
-                    const r = await fetch(`https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fen)}&multiPv=1`);
+                    const r = await fetch(`https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fen)}&multiPv=1`, { signal: AbortSignal.timeout(3000) });
                     if (r.ok) { const d = await r.json(); if (d.pvs && d.pvs[0] && d.pvs[0].moves) moveUCI = d.pvs[0].moves.split(' ')[0]; }
                 } catch (_) {}
                 if (!moveUCI) {
                     try {
-                        const r = await fetch(`https://stockfish.online/api/s/v2.php?fen=${encodeURIComponent(fen)}&depth=${this.botLevel >= 4 ? 14 : 10}`);
+                        const r = await fetch(`https://stockfish.online/api/s/v2.php?fen=${encodeURIComponent(fen)}&depth=${this.botLevel >= 4 ? 14 : 10}`, { signal: AbortSignal.timeout(3000) });
                         if (r.ok) { const d = await r.json(); if (d.success && d.bestmove) { const m = d.bestmove.match(/bestmove\s+(\S+)/); if (m) moveUCI = m[1]; } }
                     } catch (_) {}
                 }
                 if (moveUCI) {
                     const files = 'abcdefgh'; const from = { r: 8 - parseInt(moveUCI[1]), c: files.indexOf(moveUCI[0]) }; const to = { r: 8 - parseInt(moveUCI[3]), c: files.indexOf(moveUCI[2]) }; const promo = moveUCI.length > 4 ? moveUCI[4] : null; const piece = this.board[from.r][from.c];
-                    if (piece && piece.c === 'b' && this.isValidMove(piece, from.r, from.c, to.r, to.c)) { if (promo && piece.t === 'p') piece.t = promo; this.move(this.p2Id, from, to); return; }
+                    if (piece && piece.c === 'b' && this.isValidMove(piece, from.r, from.c, to.r, to.c)) {
+                        if (this.move(this.p2Id, from, to)) {
+                            if (this.lastAction.isPromotion && ['q', 'r', 'b', 'n'].includes(promo)) piece.t = promo;
+                            return;
+                        }
+                    }
                 }
             } catch (e) { console.log('Bot API fallback:', e.message); }
         }
@@ -607,8 +623,11 @@ class GameEngine {
     acceptChallenge(fromId, toId, isBot = false, botLevel = 1) {
         if (!this.players[fromId] || this.players[fromId].inBattle) return null;
         if (!isBot && (!this.players[toId] || this.players[toId].inBattle)) return null;
+        if (this.players[fromId].endingUntil > Date.now() || (!isBot && this.players[toId].endingUntil > Date.now())) return null;
+        if (!isBot && this.players[fromId].zoneId !== this.players[toId].zoneId) return null;
         const bid = 'b_' + (++this.bCounter);
         const battle = new ChessGame(bid, fromId, toId, isBot, botLevel, crazyModeEnabled);
+        battle.mapId = this.players[fromId].zoneId;
         this.battles[bid] = battle;
         this.players[fromId].inBattle = true; this.players[fromId].battleId = bid;
         if (!isBot) { this.players[toId].inBattle = true; this.players[toId].battleId = bid; }
@@ -619,6 +638,9 @@ class GameEngine {
         const winnerId = loserId === null ? null : (loserId === b.p1Id ? b.p2Id : b.p1Id);
         if (this.players[b.p1Id]) { this.players[b.p1Id].inBattle = false; this.players[b.p1Id].battleId = null; }
         if (!b.isBot && this.players[b.p2Id]) { this.players[b.p2Id].inBattle = false; this.players[b.p2Id].battleId = null; }
+        for (const id of [b.p1Id, b.p2Id]) {
+            if (this.players[id]) this.players[id].endingUntil = Date.now() + 4500;
+        }
         delete this.battles[bid]; return winnerId;
     }
 }
@@ -636,17 +658,16 @@ io.on('connection', (socket) => {
         if (storedHash && (storedHash.startsWith('$2a$') || storedHash.startsWith('$2b$') || storedHash.startsWith('$2y$'))) { valid = await bcrypt.compare(password, storedHash); } else { valid = password === storedHash; if (valid) { const newHash = await bcrypt.hash(password, 10); await db.collection('players').updateOne({ username }, { $set: { password: newHash } }); } }
         if (!valid) return socket.emit('login_error', { error: 'Senha incorreta' });
         const skin = player.skin || ''; const color = player.boardColor || '#888';
-        const isAdmin = player.username === 'Isaac';
-        engine.addPlayer(socket.id, { username, color, skin, pieceType: player.pieceType || 'classic', x: player.x || 100, y: player.y || 100, isAdmin });
-       const [npcs, sceneries, barriers, walls] = await Promise.all([
-            db.collection('npcs').find().toArray(), 
-            db.collection('scenery_map').find().toArray(), 
-            db.collection('barriers').find().toArray(), 
-            db.collection('walls').find().toArray()
-        ]);
-        
+        const isAdmin = ['Isaac', 'MAGO'].includes(player.username);
+        const map = await worldMaps.get(player.zoneId || 'main') || await worldMaps.get('main');
+        engine.addPlayer(socket.id, { username, color, skin, pieceType: player.pieceType || 'classic', x: clampToMap(player.x ?? map.spawn.x, map.width), y: clampToMap(player.y ?? map.spawn.y, map.height), isAdmin }, map.id);
+        await socket.join(mapRoom(map.id));
+        const snapshot = await worldMaps.snapshot(map.id);
+        const { npcs, sceneries, barriers, walls } = snapshot;
+        engine.players[socket.id].arrivalPortalId = snapshot.portals.find(portal=>overlaps(engine.players[socket.id],portal))?.id || null;
         socket.emit('login_success', { 
-            zoneId: 'main', 
+            ...snapshot,
+            arrivalPortalId: engine.players[socket.id].arrivalPortalId,
             user: engine.players[socket.id], 
             playerData: { 
                 username: player.username, 
@@ -661,85 +682,108 @@ io.on('connection', (socket) => {
                 losses: player.losses, 
                 isAdmin 
             }, 
-            players: engine.zones['main'].players, 
+            players: engine.zones[map.id].players,
             barriers, 
             walls, 
             npcs, 
             sceneries 
         });
         
-        socket.broadcast.emit('player_joined', { zoneId: 'main', player: engine.players[socket.id] });
+        socket.to(mapRoom(map.id)).emit('player_joined', engine.players[socket.id]);
     });
 
-    socket.on('join_zone', (zoneId) => {
-        engine.joinZone(socket.id, zoneId);
-        const zoneData = engine.zones[zoneId];
-        socket.emit('zone_snapshot', {
-            zoneId,
-            players: Object.values(zoneData.players),
-            npcs: zoneData.npcs,
-            sceneries: zoneData.sceneries,
-            barriers: zoneData.barriers,
-            walls: zoneData.walls
-        });
+    socket.on('move', (data) => {
+        const player = engine.players[socket.id];
+        if (!player || player.inBattle || !data || !Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
+        const map = engine.zones[player.zoneId]?.map;
+        player.x = map ? clampToMap(data.x, map.width) : data.x;
+        player.y = map ? clampToMap(data.y, map.height) : data.y;
+        if (player.arrivalPortalId) {
+            const portal = engine.zones[player.zoneId]?.portals?.find(portal=>portal.id===player.arrivalPortalId);
+            if (!portal || !overlaps(player,portal)) player.arrivalPortalId = null;
+        }
+        if (['up', 'down', 'left', 'right'].includes(data.dir)) player.dir = data.dir;
+        player.isMoving = data.isMoving === true;
+        socket.to(mapRoom(player.zoneId)).emit('player_moved', { id: socket.id, x: player.x, y: player.y, dir: player.dir, isMoving: player.isMoving });
     });
 
+    socket.on('join_zone', async (zoneId) => {
+        const p = engine.players[socket.id];
+        if (!p || typeof zoneId !== 'string' || (!p.isAdmin && zoneId !== p.zoneId)) return;
+        try { await worldMaps.transfer(socket,zoneId); }
+        catch (error) { socket.emit('world_error',{error:error.message}); }
+    });
+    worldMaps.register(socket);
+
+    // Capture the map before awaiting database writes, so edits cannot leak when an admin travels.
+    const onWorld = (event, handler) => socket.on(event, async data => {
+        const player = engine.players[socket.id];
+        if (!player) return;
+        const mapId = player.zoneId;
+        try { if (data && typeof data === 'object') data.mapId = mapId; await handler(data,worldMaps.scopedDatabase(mapId),io.to(mapRoom(mapId))); }
+        catch (error) { socket.emit('world_error',{error:error.message}); }
+    });
 
     socket.on('chat_msg', (msg) => {
         if (typeof msg !== 'string') return; msg = msg.trim().substring(0, 200); if (!msg) return;
-        io.emit('chat_bubble', { id: socket.id, msg });
+        const player = engine.players[socket.id]; if (!player) return;
+        io.to(mapRoom(player.zoneId)).emit('chat_bubble', { id: socket.id, msg });
     });
 
     // CRUD Eventos Omitidos para poupar espaço visual no resumo, pois já estão contidos acima nas rotas. As respostas em real-time estão ativas.
-    socket.on('create_barrier', async (data) => { if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return; data.id = 'b_' + Date.now(); await db.collection('barriers').insertOne(data); io.emit('new_barrier', data); });
-    socket.on('delete_barrier', async (id) => { if (typeof id !== 'string') return; await db.collection('barriers').deleteOne({ id }); io.emit('barrier_deleted', id); });
-    socket.on('update_barrier', async (data) => { if (!data || !data.id) return; const update = {}; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.w === 'number') update.w = data.w; if (typeof data.h === 'number') update.h = data.h; await db.collection('barriers').updateOne({ id: data.id }, { $set: update }); io.emit('barrier_updated', { ...data, ...update }); });
+    onWorld('create_barrier', async (data, worldDb, worldIO) => { if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return; data.id = 'b_' + Date.now(); await worldDb.collection('barriers').insertOne(data); worldIO.emit('new_barrier', data); });
+    onWorld('delete_barrier', async (id, worldDb, worldIO) => { if (typeof id !== 'string') return; await worldDb.collection('barriers').deleteOne({ id }); worldIO.emit('barrier_deleted', id); });
+    onWorld('update_barrier', async (data, worldDb, worldIO) => { if (!data || !data.id) return; const update = {}; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.w === 'number') update.w = data.w; if (typeof data.h === 'number') update.h = data.h; await worldDb.collection('barriers').updateOne({ id: data.id }, { $set: update }); worldIO.emit('barrier_updated', { ...data, ...update }); });
 
-    socket.on('create_wall', async (data) => { if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return; data.id = 'w_' + Date.now(); await db.collection('walls').insertOne(data); io.emit('new_wall', data); });
-    socket.on('delete_wall', async (id) => { if (typeof id !== 'string') return; await db.collection('walls').deleteOne({ id }); io.emit('wall_deleted', id); });
-    socket.on('update_wall', async (data) => { if (!data || !data.id) return; const update = {}; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.w === 'number') update.w = data.w; if (typeof data.h === 'number') update.h = data.h; await db.collection('walls').updateOne({ id: data.id }, { $set: update }); io.emit('wall_updated', { ...data, ...update }); });
+    onWorld('create_wall', async (data, worldDb, worldIO) => { if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return; data.id = 'w_' + Date.now(); await worldDb.collection('walls').insertOne(data); worldIO.emit('new_wall', data); });
+    onWorld('delete_wall', async (id, worldDb, worldIO) => { if (typeof id !== 'string') return; await worldDb.collection('walls').deleteOne({ id }); worldIO.emit('wall_deleted', id); });
+    onWorld('update_wall', async (data, worldDb, worldIO) => { if (!data || !data.id) return; const update = {}; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.w === 'number') update.w = data.w; if (typeof data.h === 'number') update.h = data.h; await worldDb.collection('walls').updateOne({ id: data.id }, { $set: update }); worldIO.emit('wall_updated', { ...data, ...update }); });
 
-    socket.on('create_global_background', async (data) => { if (!data || !data.url) return; const tileSize = data.tileSize || 256; await db.collection('global_background').deleteMany({}); await db.collection('global_background').insertOne({ url: data.url, tileSize, updatedAt: new Date() }); io.emit('global_background_update', { url: data.url, tileSize }); });
-    socket.on('create_area_background', async (data) => { if (!data || !data.url || typeof data.x !== 'number' || typeof data.y !== 'number' || typeof data.w !== 'number' || typeof data.h !== 'number') return; const area = { id: 'bg_' + Date.now(), x: data.x, y: data.y, w: data.w, h: data.h, url: data.url, z: data.z || 0, createdAt: new Date() }; await db.collection('area_backgrounds').insertOne(area); io.emit('area_background_added', area); });
-    socket.on('delete_area_background', async (id) => { if (typeof id !== 'string') return; await db.collection('area_backgrounds').deleteOne({ id }); io.emit('area_background_deleted', id); });
-    socket.on('update_area_background', async (data) => { if (!data || !data.id) return; const update = {}; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.w === 'number') update.w = data.w; if (typeof data.h === 'number') update.h = data.h; if (data.url) update.url = data.url; if (typeof data.z === 'number') update.z = data.z; await db.collection('area_backgrounds').updateOne({ id: data.id }, { $set: update }); io.emit('area_background_updated', { id: data.id, ...update }); });
+    onWorld('create_global_background', async (data, worldDb, worldIO) => { if (!data || !data.url) return; const tileSize = data.tileSize || 256; await worldDb.collection('global_background').deleteMany({}); await worldDb.collection('global_background').insertOne({ url: data.url, tileSize, updatedAt: new Date() }); await worldMaps.setBackground(data.mapId,{url:data.url,tileSize,mode:'repeat'}); worldIO.emit('global_background_update', { url: data.url, tileSize }); });
+    onWorld('create_area_background', async (data, worldDb, worldIO) => { if (!data || !data.url || typeof data.x !== 'number' || typeof data.y !== 'number' || typeof data.w !== 'number' || typeof data.h !== 'number') return; const area = { id: 'bg_' + Date.now(), x: data.x, y: data.y, w: data.w, h: data.h, url: data.url, z: data.z || 0, createdAt: new Date() }; await worldDb.collection('area_backgrounds').insertOne(area); worldIO.emit('area_background_added', area); });
+    onWorld('delete_area_background', async (id, worldDb, worldIO) => { if (typeof id !== 'string') return; await worldDb.collection('area_backgrounds').deleteOne({ id }); worldIO.emit('area_background_deleted', id); });
+    onWorld('update_area_background', async (data, worldDb, worldIO) => { if (!data || !data.id) return; const update = {}; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.w === 'number') update.w = data.w; if (typeof data.h === 'number') update.h = data.h; if (data.url) update.url = data.url; if (typeof data.z === 'number') update.z = data.z; await worldDb.collection('area_backgrounds').updateOne({ id: data.id }, { $set: update }); worldIO.emit('area_background_updated', { id: data.id, ...update }); });
 
-    socket.on('create_npc', async (data) => { if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return; data.id = 'npc_' + Date.now(); data.name = String(data.name || 'NPC').substring(0, 30); data.skin = String(data.skin || '').substring(0, 50); data.dir = ['up', 'down', 'left', 'right'].includes(data.dir) ? data.dir : 'down'; data.pieceType = String(data.pieceType || '').substring(0, 20); data.piecePack = String(data.piecePack || '').substring(0, 50); if (!Array.isArray(data.dialogues) || data.dialogues.length === 0) { data.dialogues = [{ text: String(data.dialogue || '...').substring(0, 200), responses: [] }]; } data.dialogues.forEach(d => { d.text = String(d.text || '...').substring(0, 200); if (!Array.isArray(d.responses)) d.responses = []; d.responses.forEach(r => { r.text = String(r.text || '').substring(0, 100); if (!['duel', 'close', 'next', 'none'].includes(r.action)) r.action = 'none'; }); }); delete data.dialogue; await db.collection('npcs').insertOne(data); io.emit('new_npc', data); });
-    socket.on('delete_npc', async (id) => { if (typeof id !== 'string') return; await db.collection('npcs').deleteOne({ id }); io.emit('npc_deleted', id); });
-    socket.on('update_npc', async (data) => { if (!data || !data.id) return; const update = {}; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.name === 'string') update.name = data.name.substring(0, 30); if (typeof data.skin === 'string') update.skin = data.skin.substring(0, 50); if (typeof data.pieceType === 'string') update.pieceType = data.pieceType.substring(0, 20); if (typeof data.piecePack === 'string') update.piecePack = data.piecePack.substring(0, 50); if (typeof data.isBot === 'boolean') update.isBot = data.isBot; if (typeof data.botLevel === 'number') update.botLevel = data.botLevel; if (['up', 'down', 'left', 'right'].includes(data.dir)) update.dir = data.dir; if (Array.isArray(data.dialogues)) update.dialogues = data.dialogues; await db.collection('npcs').updateOne({ id: data.id }, { $set: update }); io.emit('npc_updated', { id: data.id, ...update }); });
+    onWorld('create_npc', async (data, worldDb, worldIO) => { if (!data || typeof data.x !== 'number' || typeof data.y !== 'number') return; data.id = 'npc_' + Date.now(); data.name = String(data.name || 'NPC').substring(0, 30); data.skin = String(data.skin || '').substring(0, 50); data.dir = ['up', 'down', 'left', 'right'].includes(data.dir) ? data.dir : 'down'; data.pieceType = String(data.pieceType || '').substring(0, 20); data.piecePack = String(data.piecePack || '').substring(0, 50); if (!Array.isArray(data.dialogues) || data.dialogues.length === 0) { data.dialogues = [{ text: String(data.dialogue || '...').substring(0, 200), responses: [] }]; } data.dialogues.forEach(d => { d.text = String(d.text || '...').substring(0, 200); if (!Array.isArray(d.responses)) d.responses = []; d.responses.forEach(r => { r.text = String(r.text || '').substring(0, 100); if (!['duel', 'close', 'next', 'none'].includes(r.action)) r.action = 'none'; }); }); delete data.dialogue; await worldDb.collection('npcs').insertOne(data); worldIO.emit('new_npc', data); });
+    onWorld('delete_npc', async (id, worldDb, worldIO) => { if (typeof id !== 'string') return; await worldDb.collection('npcs').deleteOne({ id }); worldIO.emit('npc_deleted', id); });
+    onWorld('update_npc', async (data, worldDb, worldIO) => { if (!data || !data.id) return; const update = {}; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.name === 'string') update.name = data.name.substring(0, 30); if (typeof data.skin === 'string') update.skin = data.skin.substring(0, 50); if (typeof data.pieceType === 'string') update.pieceType = data.pieceType.substring(0, 20); if (typeof data.piecePack === 'string') update.piecePack = data.piecePack.substring(0, 50); if (typeof data.isBot === 'boolean') update.isBot = data.isBot; if (typeof data.botLevel === 'number') update.botLevel = data.botLevel; if (['up', 'down', 'left', 'right'].includes(data.dir)) update.dir = data.dir; if (Array.isArray(data.dialogues)) update.dialogues = data.dialogues; await worldDb.collection('npcs').updateOne({ id: data.id }, { $set: update }); worldIO.emit('npc_updated', { id: data.id, ...update }); });
 
-    socket.on('place_scenery', async (data) => { if (!data) return; data.id = 'sce_' + Date.now(); await db.collection('scenery_map').insertOne(data); io.emit('new_scenery', data); });
-    socket.on('delete_scenery', async (id) => { if (typeof id !== 'string') return; await db.collection('scenery_map').deleteOne({ id }); io.emit('scenery_deleted', id); });
-    socket.on('update_scenery', async (data) => { if (!data || !data.id) return; const update = {}; if (typeof data.w === 'number') update.w = data.w; if (typeof data.h === 'number') update.h = data.h; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.z === 'number') update.z = data.z; await db.collection('scenery_map').updateOne({ id: data.id }, { $set: update }); io.emit('scenery_updated', { id: data.id, ...update }); });
+    onWorld('place_scenery', async (data, worldDb, worldIO) => { if (!data) return; data.id = 'sce_' + Date.now(); await worldDb.collection('scenery_map').insertOne(data); worldIO.emit('new_scenery', data); });
+    onWorld('delete_scenery', async (id, worldDb, worldIO) => { if (typeof id !== 'string') return; await worldDb.collection('scenery_map').deleteOne({ id }); worldIO.emit('scenery_deleted', id); });
+    onWorld('update_scenery', async (data, worldDb, worldIO) => { if (!data || !data.id) return; const update = {}; if (typeof data.w === 'number') update.w = data.w; if (typeof data.h === 'number') update.h = data.h; if (typeof data.x === 'number') update.x = data.x; if (typeof data.y === 'number') update.y = data.y; if (typeof data.z === 'number') update.z = data.z; await worldDb.collection('scenery_map').updateOne({ id: data.id }, { $set: update }); worldIO.emit('scenery_updated', { id: data.id, ...update }); });
 
     socket.on('challenge_send', (toId) => {
         if (typeof toId !== 'string' || !engine.players[socket.id] || !engine.players[toId]) return;
-        if (engine.players[socket.id].inBattle || engine.players[toId].inBattle) return;
+        if (engine.players[socket.id].inBattle || engine.players[toId].inBattle || engine.players[socket.id].zoneId !== engine.players[toId].zoneId) return;
         engine.challenges[socket.id] = toId;
         io.to(toId).emit('challenge_received', { challengeId: socket.id, fromName: engine.players[socket.id].username });
     });
     socket.on('challenge_respond', (data) => {
         if (!data || typeof data.challengeId !== 'string') return;
-        if (data.accept && engine.challenges[data.challengeId]) {
+        if (data.accept && engine.challenges[data.challengeId] === socket.id) {
             const battle = engine.acceptChallenge(data.challengeId, socket.id);
             if (battle) {
                 const p1 = engine.players[battle.p1Id], p2 = engine.players[battle.p2Id];
                 io.to(battle.p1Id).emit('battle_start', { mySide: 'w', opp: { name: p2.username, skin: p2.skin, color: p2.color, pieceType: p2.pieceType || 'classic' }, state: battle });
                 io.to(battle.p2Id).emit('battle_start', { mySide: 'b', opp: { name: p1.username, skin: p1.skin, color: p1.color, pieceType: p1.pieceType || 'classic' }, state: battle });
-                io.emit('player_in_battle', { p1Id: battle.p1Id, p2Id: battle.p2Id });
+                io.to(mapRoom(battle.mapId)).emit('player_in_battle', { p1Id: battle.p1Id, p2Id: battle.p2Id });
             }
         }
         delete engine.challenges[data.challengeId];
     });
     socket.on('challenge_npc', (npcId) => {
         if (typeof npcId !== 'string') return;
-        db.collection('npcs').findOne({ id: npcId }).then(npc => {
+        const player = engine.players[socket.id]; if (!player) return;
+        const mapId = player.zoneId;
+        worldMaps.scopedDatabase(mapId).collection('npcs').findOne({ id: npcId }).then(npc => {
+            if (engine.players[socket.id]?.zoneId !== mapId) return;
             if (npc && npc.isBot) {
                 const battle = engine.acceptChallenge(socket.id, npc.id, true, npc.botLevel);
                 if (battle) {
+                    battle.opponentName = npc.name;
                     const npcPieceType = npc.piecePack ? 'pack:' + npc.piecePack : (npc.pieceType || 'classic');
                     socket.emit('battle_start', { mySide: 'w', opp: { name: npc.name, skin: npc.skin, color: '#f44336', pieceType: npcPieceType }, state: battle });
-                    io.emit('player_in_battle', { p1Id: socket.id, p2Id: null });
+                    io.to(mapRoom(battle.mapId)).emit('player_in_battle', { p1Id: socket.id, p2Id: null });
                 }
             }
         });
@@ -792,10 +836,8 @@ io.on('connection', (socket) => {
     socket.on('battle_forfeit', () => {
         const p = engine.players[socket.id]; if (!p || !p.battleId) return;
         const b = engine.battles[p.battleId]; if (!b) { p.inBattle = false; p.battleId = null; return; }
-        const winnerId = engine.endBattle(b.id, socket.id);
-        if (winnerId && !b.isBot) io.to(winnerId).emit('battle_end', { winner: true });
-        socket.emit('battle_end', { winner: false });
-        io.emit('player_left_battle', { p1Id: b.p1Id, p2Id: b.isBot ? null : b.p2Id });
+        b.winner = socket.id === b.p1Id ? b.p2Id : b.p1Id;
+        handleBattleEnd(b, 'forfeit');
     });
 
     socket.on('disconnect', async () => {
@@ -804,23 +846,31 @@ io.on('connection', (socket) => {
             if (p.battleId) {
                 const b = engine.battles[p.battleId];
                 if (b) {
-                    const winnerId = engine.endBattle(p.battleId, socket.id);
-                    if (winnerId && !b.isBot) io.to(winnerId).emit('battle_end', { winner: true });
-                    io.emit('player_left_battle', { p1Id: b.p1Id, p2Id: b.isBot ? null : b.p2Id });
+                    b.winner = socket.id === b.p1Id ? b.p2Id : b.p1Id;
+                    handleBattleEnd(b, 'disconnect');
                 }
             }
-            if (p.username) await db.collection('players').updateOne({ username: p.username }, { $set: { x: p.x, y: p.y } });
+            if (p.username) await worldMaps.savePlayer(p);
         }
-        engine.removePlayer(socket.id); io.emit('player_left', socket.id);
+        engine.removePlayer(socket.id); if (p) io.to(mapRoom(p.zoneId)).emit('player_left', socket.id);
     });
 
-    function handleBattleEnd(b) {
+    function handleBattleEnd(b, reason = 'checkmate') {
+        if (!engine.battles[b.id]) return;
         const isStalemate = b.status === 'stalemate';
+        const result = {
+            battleId: b.id,
+            winnerId: isStalemate ? null : b.winner,
+            winnerName: isStalemate ? null : (engine.players[b.winner]?.username || b.opponentName || 'NPC'),
+            reason: isStalemate ? 'stalemate' : reason,
+            stalemate: isStalemate
+        };
         const loserId = isStalemate ? null : (b.winner === b.p1Id ? b.p2Id : b.p1Id);
         if (loserId) engine.endBattle(b.id, loserId); else engine.endBattle(b.id, null);
-        io.to(b.p1Id).emit('battle_end', { winner: isStalemate ? null : b.winner === b.p1Id, stalemate: isStalemate });
-        if (!b.isBot) io.to(b.p2Id).emit('battle_end', { winner: isStalemate ? null : b.winner === b.p2Id, stalemate: isStalemate });
-        io.emit('player_left_battle', { p1Id: b.p1Id, p2Id: b.isBot ? null : b.p2Id });
+        io.to(b.p1Id).emit('battle_end', { ...result, winner: isStalemate ? null : b.winner === b.p1Id });
+        if (!b.isBot) io.to(b.p2Id).emit('battle_end', { ...result, winner: isStalemate ? null : b.winner === b.p2Id });
+        io.to(mapRoom(b.mapId)).emit('battle_result', result);
+        io.to(mapRoom(b.mapId)).emit('player_left_battle', { p1Id: b.p1Id, p2Id: b.isBot ? null : b.p2Id });
     }
 });
 
